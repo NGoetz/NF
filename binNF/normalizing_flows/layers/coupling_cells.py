@@ -40,9 +40,13 @@ class AffineCoupling(torch.nn.Module):
         xA = x[:, :self.pass_through_size]
         xB = x[:, self.pass_through_size:self.flow_size]  
         shift_rescale = self.NN(xA) #The NN is evaluated on the pass-through dimensons
+        
+       
         shift_rescale[:, 1] = torch.exp((shift_rescale[:, 1])) 
-        yB = torch.mul(xB, shift_rescale[:, 1]) + 1e-1*shift_rescale[:, 0] #xB is transformed. The translation is regularised
+        yB = torch.mul(xB, shift_rescale[:, 1]) + shift_rescale[:, 0] #xB is transformed. The translation is regularised
         jacobian = x[:, self.flow_size] #the old jacobian is saved in the last row of the data...
+       
         jacobian = torch.mul(jacobian,torch.prod(shift_rescale[:, 1], 1)) #... and updated by the forward transformation
+        
         return torch.cat((xA, yB, torch.unsqueeze(jacobian, 1)), dim=1)  #everything is packed in one tensor again
     

@@ -19,6 +19,7 @@ class AddJacobian(torch.nn.Module):
     def __init__(self, jacobian_value=torch.ones(1)):
         super(AddJacobian, self).__init__()
         self.jacobian_value = jacobian_value
+       
 
     
     def forward(self, input):

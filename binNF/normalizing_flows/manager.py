@@ -91,25 +91,28 @@ class BasicManager(ModelAPI):
             loss = 0
             std = 0
             optimizer_object.zero_grad()
-            with torch.enable_grad():
-                w = torch.empty(batch_size, self.n_flow,requires_grad=True)
-                torch.nn.init.uniform_(w)
-
-                XJ = self.model(                                            # Pass through the model
-                    self.format_input(                                      # Append a unit Jacobian to each point
-                        w# Generate a batch of points in latent space
-                    )
+            
+            w = torch.empty(batch_size, self.n_flow)
+            torch.nn.init.uniform_(w)
+            
+            XJ = self.model(                                            # Pass through the model
+                self.format_input(                                      # Append a unit Jacobian to each point
+                    w# Generate a batch of points in latent space
                 )
-                # Separate the points and their Jacobians:
-                # This sample is fixed, we optimize the Jacobian
-                X = (XJ[:, :-1]).detach()
-                # # Apply function values and combine with the Jacobian (last entry of each X)
-                fXJ = torch.mul(f(X), XJ[:, -1])
+            )
 
-                # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
-                loss = torch.mean(fXJ**2)
-                loss.backward()             
-                std= torch.std(fXJ)
+            
+            # Separate the points and their Jacobians:
+            # This sample is fixed, we optimize the Jacobian
+            X = (XJ[:, :-1]).detach()
+            # # Apply function values and combine with the Jacobian (last entry of each X)
+            
+            fXJ = torch.mul(f(X), XJ[:, -1])
+            
+            # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
+            loss = torch.mean(fXJ**2)
+            loss.backward()             
+            std= torch.std(fXJ)
                 
             optimizer_object.step()
            
