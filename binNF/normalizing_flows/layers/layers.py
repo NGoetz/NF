@@ -1,4 +1,11 @@
 import torch
+import numpy as np
+
+
+def tanp(input):
+    return (1+((torch.tan((input-0.5)*np.pi))**2))*np.pi   #derivative for jacobian    
+
+
 
 
 class Reshape(torch.nn.Module):
@@ -18,11 +25,11 @@ class AddJacobian(torch.nn.Module):
     """
     def __init__(self, jacobian_value=torch.ones(1)):
         super(AddJacobian, self).__init__()
-        self.jacobian_value = jacobian_value
-       
+        self.jacobian_value = jacobian_value   
 
     
     def forward(self, input):
+        
         return torch.cat((input, self.jacobian_value.expand(input.shape[0],1)), dim=1)
 
 

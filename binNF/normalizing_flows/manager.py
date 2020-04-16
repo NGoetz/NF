@@ -1,13 +1,19 @@
 import torch as torch
 import os
 import yaml
+import numpy as np
 from tensorboard.plugins.hparams import api as hp
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.autonotebook import tqdm
 from .layers.coupling_cells import  AffineCoupling
 from .layers.layers import AddJacobian, RollLayer
+from statistics import mean
 
+def tanp(x):
+    return 100*(1+((torch.tan((x-0.5)*np.pi))**2))*np.pi   #derivative for jacobian
 
+def atanp(x):
+    return (1/100)*(np.pi/(x**2+np.pi**2))   #derivative for jacobian
 
 class ModelAPI():
 
@@ -76,28 +82,31 @@ class BasicManager(ModelAPI):
         if logging:
             history = {}
         w = torch.empty(batch_size, self.n_flow)
-        torch.nn.init.uniform_(w)  # Generate a batch of points in latent space
+       # torch.nn.init.uniform_(w)  # Generate a batch of points in latent space
         # Run the model once
+        """
+        Y=torch.tan((w-0.5)*(np.pi))
         XJ = self.model(  # Pass through the model
             self.format_input(  # Append a unit Jacobian to each point
-                w
+                Y
             )
-        )
-       
+          )
+        """
         
-        variables = self.model.parameters()
+    
         
         for i in epoch_progress:
             loss = 0
             std = 0
             optimizer_object.zero_grad()
             
+            #if(i%5==0):
             w = torch.empty(batch_size, self.n_flow)
             torch.nn.init.uniform_(w)
-            
+            Y=100*torch.tan((w-0.5)*(np.pi))
             XJ = self.model(                                            # Pass through the model
                 self.format_input(                                      # Append a unit Jacobian to each point
-                    w# Generate a batch of points in latent space
+                    Y# Generate a batch of points in latent space
                 )
             )
 
@@ -105,21 +114,28 @@ class BasicManager(ModelAPI):
             # Separate the points and their Jacobians:
             # This sample is fixed, we optimize the Jacobian
             X = (XJ[:, :-1]).detach()
-            # # Apply function values and combine with the Jacobian (last entry of each X)
+            #Z=torch.atan(X/100)/(100*np.pi)+0.5
+           
             
-            fXJ = torch.mul(f(X), XJ[:, -1])
+            #jacs=torch.mul(torch.abs(torch.prod(tanp(w),axis=-1)),torch.abs(torch.prod(atanp(X),axis=-1)))
+            fz=torch.mul(f(X).detach(),torch.abs(torch.prod(tanp(w),axis=-1)))
+           
+            fXJ = torch.mul(fz, XJ[:, -1])
             
             # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
             loss = torch.mean(fXJ**2)
-            loss.backward()             
-            std= torch.std(fXJ)
+            var=torch.var(fXJ**2)
+           
+            loss.backward()
+            
                 
             optimizer_object.step()
-           
+            std= torch.std(fXJ)
+            
             # Update the progress bar
             if pretty_progressbar:
                 epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
-#######
+
             # Log the relevant data for internal use
             if logging:
                 history[str(i)]={"loss":float(loss), "std":float(std)}
@@ -128,7 +144,7 @@ class BasicManager(ModelAPI):
             writer.add_scalar('loss', float(loss),i)
             writer.add_scalar('std', float(std),i)
 
-####
+
         
         writer.close()
         
@@ -184,7 +200,7 @@ class AffineManager(BasicManager):
                 AffineCoupling(flow_size=self.n_flow, pass_through_size=n_pass_through,
                                                 NN_layers=NN)
             )
-            self._model.add_module("roll",RollLayer(roll_step)) #add roll layer
+           # self._model.add_module("roll",RollLayer(roll_step)) #add roll layer
         
        
         w = torch.empty(1, self.n_flow)
