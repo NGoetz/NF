@@ -1,4 +1,5 @@
 import torch as torch
+import copy
 import os
 import yaml
 import numpy as np
@@ -10,10 +11,13 @@ from .layers.layers import AddJacobian, RollLayer
 from statistics import mean
 
 def tanp(x):
-    return 100*(1+((torch.tan((x-0.5)*np.pi))**2))*np.pi   #derivative for jacobian
+    return 150*(1+((torch.tan((x-0.5)*np.pi))**2))*np.pi   #derivative for jacobian
 
 def atanp(x):
-    return (1/100)*(np.pi/(x**2+np.pi**2))   #derivative for jacobian
+    return (1/150)*(np.pi/(x**2+np.pi**2))   #derivative for jacobian
+
+def normal(x,mu, sigma, n_flow):
+    return (torch.exp(-torch.sum((x-mu)**2/(2*sigma**2),-1)))/(sigma*np.sqrt((2*np.pi)**n_flow))
 
 class ModelAPI():
 
@@ -47,7 +51,7 @@ class BasicManager(ModelAPI):
         
 
     def _train_variance_forward(self, f, batch_size = 10000, epochs=10, epoch_start=0,
-                                logging=True, pretty_progressbar=True,
+                                logging=True, pretty_progressbar=True,  save_best=True,
                                 *, optimizer_object, logdir, **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
@@ -82,17 +86,25 @@ class BasicManager(ModelAPI):
         if logging:
             history = {}
         w = torch.empty(batch_size, self.n_flow)
-       # torch.nn.init.uniform_(w)  # Generate a batch of points in latent space
-        # Run the model once
         """
+        torch.nn.init.uniform_(w)  # Generate a batch of points in latent space
         Y=torch.tan((w-0.5)*(np.pi))
+        """
+        # Run the model once
+        torch.nn.init.normal_(w, std=10)
+        
         XJ = self.model(  # Pass through the model
             self.format_input(  # Append a unit Jacobian to each point
-                Y
+                w
             )
           )
-        """
-        
+       
+        if save_best:
+            X=XJ[:,:-1]
+            fz=torch.div(f(X),normal(X,0,10,self.n_flow))
+            J = XJ[:,-1]
+            best_std = torch.std(fz*J)
+            best_loss=torch.mean((fz*J)**2)
     
         
         for i in epoch_progress:
@@ -102,11 +114,17 @@ class BasicManager(ModelAPI):
             
             #if(i%5==0):
             w = torch.empty(batch_size, self.n_flow)
+            
+            torch.nn.init.normal_(w, std=10)
+            """
             torch.nn.init.uniform_(w)
-            Y=100*torch.tan((w-0.5)*(np.pi))
+            Y=150*torch.tan((w-0.5)*(np.pi))
+            """
+            
             XJ = self.model(                                            # Pass through the model
                 self.format_input(                                      # Append a unit Jacobian to each point
-                    Y# Generate a batch of points in latent space
+                    #Y# Generate a batch of points in latent space
+                    w
                 )
             )
 
@@ -118,8 +136,11 @@ class BasicManager(ModelAPI):
            
             
             #jacs=torch.mul(torch.abs(torch.prod(tanp(w),axis=-1)),torch.abs(torch.prod(atanp(X),axis=-1)))
+            """
             fz=torch.mul(f(X).detach(),torch.abs(torch.prod(tanp(w),axis=-1)))
-           
+            """
+            fz=torch.div(f(X).detach(),normal(X,0,10,self.n_flow))
+            
             fXJ = torch.mul(fz, XJ[:, -1])
             
             # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
@@ -143,8 +164,16 @@ class BasicManager(ModelAPI):
            
             writer.add_scalar('loss', float(loss),i)
             writer.add_scalar('std', float(std),i)
-
-
+            
+            if save_best and loss < best_loss:
+                best_std = std
+                best_loss = loss
+                self.best_model=copy.deepcopy(self.model)
+             
+            """
+            if save_best and loss > 2*best_loss:
+                break
+            """
         
         writer.close()
         
@@ -200,7 +229,7 @@ class AffineManager(BasicManager):
                 AffineCoupling(flow_size=self.n_flow, pass_through_size=n_pass_through,
                                                 NN_layers=NN)
             )
-           # self._model.add_module("roll",RollLayer(roll_step)) #add roll layer
+            self._model.add_module("roll",RollLayer(roll_step)) #add roll layer
         
        
         w = torch.empty(1, self.n_flow)

@@ -18,7 +18,7 @@ class AffineCoupling(torch.nn.Module):
         self.transform_size = flow_size - pass_through_size
         
         #the last layer has 2 outputs: scaling factor and translation
-        sizes = NN_layers + [(1 * self.transform_size)] 
+        sizes = NN_layers + [(2 * self.transform_size)] 
         NN_layers=[]
         NN_layers.append(torch.nn.Tanh())
         NN_layers.append(torch.nn.Linear(pass_through_size, sizes[0]))#size only one dim
@@ -30,11 +30,12 @@ class AffineCoupling(torch.nn.Module):
             NN_layers.append(torch.nn.ReLU())
             oldsize=size
        
-       # NN_layers.append(torch.nn.Tanh())  
+         
         NN_layers.append((torch.nn.Linear(oldsize,sizes[-1])))
+       
         NN_layers.append(torch.nn.Sigmoid())
         
-        NN_layers.append(Reshape(1, self.transform_size))
+        NN_layers.append(Reshape(2, self.transform_size))
         #we construct a Sequential module from our NN
         self.NN = torch.nn.Sequential(*NN_layers)
         
@@ -43,14 +44,15 @@ class AffineCoupling(torch.nn.Module):
         xA = x[:, :self.pass_through_size]
         xB = x[:, self.pass_through_size:self.flow_size]  
         shift_rescale = self.NN(xA) #The NN is evaluated on the pass-through dimensons
-        #shift_rescale[:, 0] = torch.exp(((shift_rescale[:, 0]))) 
-        
-        #print(shift_rescale[:,1])
-        yB = torch.mul(xB, shift_rescale[:, 0])# + shift_rescale[:, 1] #xB is transformed. The translation is regularised
+        z=torch.ones_like(shift_rescale[:,0])
+        s0=shift_rescale[:,0]
+        s1=5*torch.tan(np.pi*(shift_rescale[:,1]-0.5))
+        #s1=10*shift_rescale[:,1]-5
+        yB = torch.mul(xB, s0) + s1 #xB is transformed. 
         
         jacobian = x[:, self.flow_size] #the old jacobian is saved in the last row of the data...
         
-        jacobian = jacobian*torch.prod(shift_rescale[:, 0],1) #... and updated by the forward transformation
+        jacobian = jacobian*torch.prod(s0,1) #... and updated by the forward transformation
        
         return torch.cat((xA, yB, torch.unsqueeze(jacobian, 1)), dim=1)  #everything is packed in one tensor again
 """ 
