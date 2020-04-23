@@ -6,7 +6,7 @@ import numpy as np
 from tensorboard.plugins.hparams import api as hp
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.autonotebook import tqdm
-from .layers.coupling_cells import  AffineCoupling
+from .layers.coupling_cells import  AffineCoupling, PWLin
 from .layers.layers import AddJacobian, RollLayer
 from statistics import mean
 
@@ -86,25 +86,31 @@ class BasicManager(ModelAPI):
         if logging:
             history = {}
         w = torch.empty(batch_size, self.n_flow)
-        """
+       # """
         torch.nn.init.uniform_(w)  # Generate a batch of points in latent space
-        Y=torch.tan((w-0.5)*(np.pi))
-        """
+       # Y=torch.tan((w-0.5)*(np.pi))
+       # """
         # Run the model once
-        torch.nn.init.normal_(w, std=10)
+        #torch.nn.init.normal_(w, std=10)
         
         XJ = self.model(  # Pass through the model
             self.format_input(  # Append a unit Jacobian to each point
                 w
             )
           )
-       
+        
         if save_best:
             X=XJ[:,:-1]
-            fz=torch.div(f(X),normal(X,0,10,self.n_flow))
+            #fz=torch.div(f(X),normal(X,0,10,self.n_flow))
+            fz=f(X)
             J = XJ[:,-1]
-            best_std = torch.std(fz*J)
-            best_loss=torch.mean((fz*J)**2)
+            self.best_std = torch.std(fz*J)
+            self.best_loss=torch.mean((fz*J)**2)
+            self.best_model=self.model
+            self.best_var=torch.var((fz*J)**2)
+            self.int_std=self.best_std
+            self.int_loss=self.best_loss
+            self.int_var=self.best_var
     
         
         for i in epoch_progress:
@@ -115,11 +121,11 @@ class BasicManager(ModelAPI):
             #if(i%5==0):
             w = torch.empty(batch_size, self.n_flow)
             
-            torch.nn.init.normal_(w, std=10)
-            """
+            #torch.nn.init.normal_(w, std=10)
+            #"""
             torch.nn.init.uniform_(w)
-            Y=150*torch.tan((w-0.5)*(np.pi))
-            """
+            #Y=150*torch.tan((w-0.5)*(np.pi))
+            #"""
             
             XJ = self.model(                                            # Pass through the model
                 self.format_input(                                      # Append a unit Jacobian to each point
@@ -139,9 +145,9 @@ class BasicManager(ModelAPI):
             """
             fz=torch.mul(f(X).detach(),torch.abs(torch.prod(tanp(w),axis=-1)))
             """
-            fz=torch.div(f(X).detach(),normal(X,0,10,self.n_flow))
+            #fz=torch.div(f(X).detach(),normal(X,0,10,self.n_flow))
             
-            fXJ = torch.mul(fz, XJ[:, -1])
+            fXJ = torch.mul(f(X), XJ[:, -1])
             
             # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
             loss = torch.mean(fXJ**2)
@@ -165,15 +171,17 @@ class BasicManager(ModelAPI):
             writer.add_scalar('loss', float(loss),i)
             writer.add_scalar('std', float(std),i)
             
-            if save_best and loss < best_loss:
-                best_std = std
-                best_loss = loss
+            if save_best and loss < self.best_loss:
+                self.best_std = std
+                self.best_loss = loss
+                self.best_var=var
                 self.best_model=copy.deepcopy(self.model)
+                self.best_epoch=i
              
-            """
-            if save_best and loss > 2*best_loss:
+            
+            if save_best and loss > 1.2*self.best_loss:
                 break
-            """
+            
         
         writer.close()
         
@@ -232,8 +240,65 @@ class AffineManager(BasicManager):
             self._model.add_module("roll",RollLayer(roll_step)) #add roll layer
         
        
-        w = torch.empty(1, self.n_flow)
+        w = torch.empty(10, self.n_flow)
+        torch.nn.init.uniform_(w)
+        # Do one pass forward:
+        self._model(self.format_input(w))  
+        
+        
+class PWLinManager(BasicManager):
+    
+    """A manager for normalizing flows with piecewise-linear coupling cells interleaved with rolling layers that
+    apply cyclic permutations on the variables. All cells have the same number of pass through variables and the
+    same step size in the cyclic permutation.
+    Each coupling cell has a fully connected NN with a fixed number of layers (depth) of fixed size (width)
+
+    Hyperparameters:
+    - n_pass_through
+    - n_bins
+    - nn_width
+    - nn_depth
+    - roll_step
+    """
+
+    format_input = AddJacobian()
+    
+
+    def create_model(self,*,
+                     n_pass_through,
+                     n_cells,
+                     n_bins,
+                     NN,
+                     roll_step,
+                     **opts
+                     ):
+        """
+
+        Args:
+            n_pass_through ():
+            n_cells ():
+            n_bins:
+            NN():
+            roll_step ():
+            **opts ():
+
+        Returns:
+
+        """
+        
+        self._model = torch.nn.Sequential()
+        
+        for i_cell in range(n_cells):#create coupling cells
+            self._model.add_module(str(i_cell),
+                PWLin(flow_size=self.n_flow, pass_through_size=n_pass_through,n_bins=n_bins,
+                                                NN_layers=NN)
+            )
+            self._model.add_module("roll",RollLayer(roll_step)) #add roll layer
+        self.best_model=self.model
+       
+        w = torch.empty(5, self.n_flow)
         torch.nn.init.uniform_(w)
         # Do one pass forward:
         self._model(self.format_input(w))    
     
+
