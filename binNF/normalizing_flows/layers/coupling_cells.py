@@ -101,6 +101,8 @@ class PWLin(torch.nn.Module):
         
 
     def forward(self, x):
+        
+        
         xA = x[:, :self.pass_through_size]
         xB = x[:, self.pass_through_size:self.flow_size]
         

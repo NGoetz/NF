@@ -28,9 +28,9 @@ class AddJacobian(torch.nn.Module):
         self.jacobian_value = jacobian_value   
 
     
-    def forward(self, input):
+    def forward(self, input, dev):
         
-        return torch.cat((input, self.jacobian_value.expand(input.shape[0],1)), dim=1)
+        return torch.cat((input.to(dev), self.jacobian_value.expand(input.shape[0],1).to(dev)), dim=1)
 
 
 class RollLayer(torch.nn.Module):
