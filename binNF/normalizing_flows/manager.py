@@ -11,6 +11,7 @@ from statistics import mean
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 import time
+import datetime
 
 
 
@@ -60,7 +61,7 @@ class BasicManager(ModelAPI):
 
     
     def _train_variance_forward_seq(self, f, optimizer_object, logdir, batch_size = 10000, epochs=10, epoch_start=0,
-                                logging=True, pretty_progressbar=True,  save_best=True, 
+                                logging=True, pretty_progressbar=True,  save_best=True, _run=None,n=0,
                                 **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
@@ -77,25 +78,31 @@ class BasicManager(ModelAPI):
             logdir():
             **train_opts ():
 
-        Returns: history
+        Returns: None
 
         """
-        dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        dev = torch.device("cuda:"+str(n)) if torch.cuda.is_available() else torch.device("cpu")
+        filename=logdir+"/"+str(_run._id)+"/torch"
+        file= open(filename,"w+")
+        file.close()
          
-        writer=SummaryWriter(log_dir=logdir)
+        #writer=SummaryWriter(log_dir=logdir)
         
         # Instantiate a pretty progress bar if needed
         if pretty_progressbar:
             epoch_progress = tqdm(range(epoch_start,epoch_start+epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
         else:
             epoch_progress = range(epoch_start, epoch_start+epochs)
-            
+           
+        """
 #######################################
         # Keep track of metric history if needed
         if logging:
             history = {}
+        """
         w = torch.empty(batch_size, self.n_flow)
-       # """
+       # 
+        
         torch.nn.init.uniform_(w).to(dev)  # Generate a batch of points in latent space
        # Y=torch.tan((w-0.5)*(np.pi))
        # """
@@ -120,8 +127,15 @@ class BasicManager(ModelAPI):
             self.int_std=self.best_std
             self.int_loss=self.best_loss
             self.int_var=self.best_var
+            self.best_epoch=0
+            self.best_time=0
+        if(_run!=None):
+            _run.log_scalar("training.int_loss", self.best_loss.tolist(), 0)
+            _run.log_scalar("training.int_var", self.best_var.tolist(), 0)
+            _run.log_scalar("training.int_std", self.best_std.tolist(), 0)
+           
     
-        torch.seed()
+        torch.initial_seed()
         for i in epoch_progress:
             loss = 0
             std = 0
@@ -171,7 +185,13 @@ class BasicManager(ModelAPI):
             # Update the progress bar
             if pretty_progressbar:
                 epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
+            if(_run!=None and i%5==0):       
+                _run.log_scalar("training.loss", loss.tolist(), i)
+                _run.log_scalar("training.var", var.tolist(), i)
+                #_run.log_scalar("training.std", std.tolist(), i)
 
+                
+            """
             # Log the relevant data for internal use
             if logging:
                 history[str(i)]={"loss":float(loss), "std":float(std)}
@@ -179,26 +199,44 @@ class BasicManager(ModelAPI):
            
             writer.add_scalar('loss', float(loss),i)
             writer.add_scalar('std', float(std),i)
-            
+            """
             if save_best and loss < self.best_loss:
                 self.best_std = std
                 self.best_loss = loss
                 self.best_var=var
                 self.best_model=copy.deepcopy(self.model)
                 self.best_epoch=i
-             
+                self.best_time=(datetime.datetime.utcnow()-_run.start_time).total_seconds()
+               
+               
             
-            if save_best and loss > 1.2*self.best_loss:
+            if save_best and loss > 1.4*self.best_loss:
                 break   
-        
+        """
         writer.close()
         
         if logging:
             self.history=history
+        """
+        if(_run!=None):
+            _run.log_scalar("training.best_loss", self.best_loss.tolist(), 0)
+            _run.log_scalar("training.best_var", self.best_var.tolist(), 0)
+            _run.log_scalar("training.best_std", self.best_std.tolist(), 0)
+            _run.log_scalar("training.best_epoch", self.best_epoch, 0)
         
-  
+            _run.log_scalar("training.best_time", self.best_time, 0)
         
-        return history 
+        torch.save({
+            'best_epoch': self.best_epoch,
+            'end_loss': self.best_loss,
+            'end_var':self.best_var ,
+            'int_loss': self.int_loss,
+            'int_var':self.int_var,
+            'model_state_dict': self.best_model.state_dict()
+            },filename)
+
+        
+        pass
     
   
             
