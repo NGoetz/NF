@@ -136,7 +136,105 @@ class PWLin(torch.nn.Module):
       
         jacobian = jacobian*torch.prod(cdf_float_part, axis=-2) 
         return torch.cat((xA, cdf, jacobian), axis=-1) 
-        
     
+class PWQuad(torch.nn.Module):
+   
+    def __init__(self,flow_size, pass_through_size, n_bins,NN_layers):
+        super(PWQuad, self).__init__()
+        
+        self.pass_through_size = pass_through_size
+        self.flow_size = flow_size
+        self.transform_size = flow_size - pass_through_size
+        self.n_bins=n_bins
+        
+        #the last layer has the bins as output
+        sizes = NN_layers + [( self.transform_size*(2*self.n_bins+1))]
+        self.NN=RectNN(pass_through_size,sizes,(self.transform_size,(2*self.n_bins+1))).NN
+        
+    def forward(self, x): #CUDA
+     
+        xA = x[:, :self.pass_through_size]
+        xB = x[:, self.pass_through_size:self.flow_size]
+        
+        jacobian = torch.unsqueeze(x[:, self.flow_size], -1)
+        Z=self.NN(xA)
+        V=Z[:,:,:self.n_bins+1]
+        W=Z[:,:,self.n_bins+1:]
+       
+        dev=W.device
+        W=torch.exp(W)
+        
+        Wsum = torch.cumsum(W, axis=-1) 
+        
+        Wnorms = torch.unsqueeze(Wsum[:, :, -1], axis=-1) 
+        
+        W = W/Wnorms
+        
+        Wsum=Wsum/Wnorms
+        
+        V=torch.exp(V)
+        
+        Vsum=torch.cumsum(V, axis=-1)
+        
+        
+        Vnorms=torch.cumsum(torch.mul((V[:,:,:-1]+V[:,:,1:])/2,W),axis=-1)
+        
+        Vnorms_tot=Vnorms[:, :, -1].clone() 
+        V=torch.div(V,torch.unsqueeze(Vnorms_tot,axis=-1)) 
+      
+        finder=torch.where(Wsum>torch.unsqueeze(xB,axis=-1),torch.zeros_like(Wsum),torch.ones_like(Wsum))
+        
+        div_ind=torch.argmax(finder*Wsum,-1)
+        
+        div_ind=torch.unsqueeze(torch.where(div_ind==torch.empty_like(div_ind).fill_(self.n_bins-1),
+                                            torch.empty_like(div_ind).fill_(-1),div_ind),axis=-1)
+        
+        Wsum2=torch.cat((torch.zeros([Wsum.shape[0],Wsum.shape[1],1]).to(dev),Wsum),axis=-1)
+        
+        alphas=torch.div((xB-torch.squeeze(torch.gather(Wsum2,-1,div_ind+1),axis=-1)),
+                         torch.squeeze(torch.gather(W,-1,div_ind+1),axis=-1))
+        
+        VW=torch.cat((torch.zeros([V.shape[0],V.shape[1],1]).to(dev),
+                                  Vnorms),axis=-1)
+        
+        shift= torch.squeeze(torch.gather(VW,-1,div_ind+1),axis=-1)
+        
+        yB1=torch.mul((alphas**2)/2,torch.squeeze(torch.mul(torch.gather(V,-1, div_ind+2)-torch.gather(V,-1, div_ind+1),
+                                                            torch.gather(W,-1,div_ind+1)),axis=-1))
+        
+        yB2=torch.mul(torch.mul(alphas,torch.squeeze(torch.gather(V,-1,div_ind+1),axis=-1)),
+                                torch.squeeze(torch.gather(W,-1,div_ind+1),axis=-1))
+       
+        yB=yB1+yB2+shift
+        
+        
+        jacobian=jacobian*torch.unsqueeze(torch.prod(torch.lerp(torch.squeeze(torch.gather(V,-1,div_ind+1),axis=-1),
+                                                torch.squeeze(torch.gather(V,-1,div_ind+2),axis=-1),alphas), axis=-1),axis=-1)
+       
+        return torch.cat((xA, yB, jacobian), axis=-1) 
+        
+class RectNN(torch.nn.Module):
+    def __init__(self,pass_through_size,sizes,reshape):
+        super(RectNN, self).__init__()
+        NN_layers=[]
+        NN_layers.append(torch.nn.BatchNorm1d(pass_through_size))
+        NN_layers.append(torch.nn.Linear(pass_through_size, sizes[0],bias=False))
+        NN_layers.append(torch.nn.BatchNorm1d(sizes[0]))
+        NN_layers.append(torch.nn.ReLU())
+        oldsize=sizes[0]
+        
+        for size in sizes[1:-1]:
+            NN_layers.append(torch.nn.Linear(oldsize,size,bias=False))
+            NN_layers.append(torch.nn.BatchNorm1d(size))
+            NN_layers.append(torch.nn.ReLU())
+            oldsize=size
+       
+        
+        NN_layers.append((torch.nn.Linear(oldsize,sizes[-1])))
+        
+        
+        NN_layers.append(Reshape(reshape[0], reshape[1]))
+        #we construct a Sequential module from our NN
+        self.NN = torch.nn.Sequential(*NN_layers)
 
     

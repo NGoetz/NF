@@ -5,8 +5,8 @@ import yaml
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.autonotebook import tqdm
-from .layers.coupling_cells import  AffineCoupling, PWLin
-from .layers.layers import AddJacobian, RollLayer
+from .layers.coupling_cells import  AffineCoupling, PWLin, PWQuad
+from .layers.layers import AddJacobian, RollLayer, BatchLayer
 from statistics import mean
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
@@ -81,10 +81,19 @@ class BasicManager(ModelAPI):
         Returns: None
 
         """
+        
         dev = torch.device("cuda:"+str(n)) if torch.cuda.is_available() else torch.device("cpu")
-        filename=logdir+"/"+str(_run._id)+"/torch"
-        file= open(filename,"w+")
-        file.close()
+        if(_run!=None): 
+            filename=logdir+"/"+str(_run._id)+"/torch"
+            
+        else:
+            filename=logdir+"/torch"
+        try:
+            file= open(filename,"w+")
+            file.close()
+        except:
+                print("Torch save not possible")
+        
          
         #writer=SummaryWriter(log_dir=logdir)
         
@@ -104,6 +113,7 @@ class BasicManager(ModelAPI):
        # 
         
         torch.nn.init.uniform_(w).to(dev)  # Generate a batch of points in latent space
+       
        # Y=torch.tan((w-0.5)*(np.pi))
        # """
         # Run the model once
@@ -117,25 +127,27 @@ class BasicManager(ModelAPI):
         
         if save_best:
             X=XJ[:,:-1]
-            #fz=torch.div(f(X),normal(X,0,10,self.n_flow))
+            
             fz=f(X)
             J = XJ[:,-1]
-            self.best_std = torch.std(fz*J)
+            
             self.best_loss=torch.mean((fz*J)**2)
             self.best_model=self.model
-            self.best_var=torch.var((fz*J)**2)
-            self.int_std=self.best_std
+           
+            
             self.int_loss=self.best_loss
-            self.int_var=self.best_var
+           
             self.best_epoch=0
             self.best_time=0
+            self.best_loss_rel=self.best_loss
+            self.func_count=1
         if(_run!=None):
             _run.log_scalar("training.int_loss", self.best_loss.tolist(), 0)
-            _run.log_scalar("training.int_var", self.best_var.tolist(), 0)
-            _run.log_scalar("training.int_std", self.best_std.tolist(), 0)
+           
            
     
-        torch.initial_seed()
+        #torch.initial_seed()
+        stale_save=1000
         for i in epoch_progress:
             loss = 0
             std = 0
@@ -171,24 +183,24 @@ class BasicManager(ModelAPI):
             #fz=torch.div(f(X).detach(),normal(X,0,10,self.n_flow))
             
             fXJ = torch.mul(f(X), XJ[:, -1])
-            
+            self.func_count=self.func_count+1
             # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
             loss = torch.mean(fXJ**2)
-            var=torch.var(fXJ**2)
+            
            
             loss.backward()
             
                 
             optimizer_object.step()
-            std= torch.std(fXJ)
+            
             
             # Update the progress bar
             if pretty_progressbar:
                 epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
             if(_run!=None and i%5==0):       
                 _run.log_scalar("training.loss", loss.tolist(), i)
-                _run.log_scalar("training.var", var.tolist(), i)
-                #_run.log_scalar("training.std", std.tolist(), i)
+                _run.log_scalar("training.loss_rel",(loss/self.int_loss).tolist(),i)
+               
 
                 
             """
@@ -201,16 +213,24 @@ class BasicManager(ModelAPI):
             writer.add_scalar('std', float(std),i)
             """
             if save_best and loss < self.best_loss:
-                self.best_std = std
                 self.best_loss = loss
-                self.best_var=var
+                self.best_loss_rel=loss/self.int_loss
                 self.best_model=copy.deepcopy(self.model)
                 self.best_epoch=i
-                self.best_time=(datetime.datetime.utcnow()-_run.start_time).total_seconds()
-               
-               
-            
-            if save_best and loss > 1.4*self.best_loss:
+                self.best_func_count=self.func_count*batch_size
+                if(_run!=None):
+                    self.best_time=(datetime.datetime.utcnow()-_run.start_time).total_seconds()
+                else:
+                    self.best_time=0
+                if i%50==0 and self.best_loss/stale_save>(1-1e-3):
+                    break
+                else:
+                    stale_save=self.best_loss 
+                if _run!=None and self.best_time>600:
+                    break
+                
+                
+            if save_best and loss > 1.3*self.best_loss:
                 break   
         """
         writer.close()
@@ -220,20 +240,23 @@ class BasicManager(ModelAPI):
         """
         if(_run!=None):
             _run.log_scalar("training.best_loss", self.best_loss.tolist(), 0)
-            _run.log_scalar("training.best_var", self.best_var.tolist(), 0)
-            _run.log_scalar("training.best_std", self.best_std.tolist(), 0)
+            _run.log_scalar("training.best_loss_rel", (self.best_loss_rel).tolist(), 0)
+           
             _run.log_scalar("training.best_epoch", self.best_epoch, 0)
         
             _run.log_scalar("training.best_time", self.best_time, 0)
-        
-        torch.save({
-            'best_epoch': self.best_epoch,
-            'end_loss': self.best_loss,
-            'end_var':self.best_var ,
-            'int_loss': self.int_loss,
-            'int_var':self.int_var,
-            'model_state_dict': self.best_model.state_dict()
-            },filename)
+            _run.log_scalar("training.best_func_count", self.best_func_count, 0)
+        try:
+            torch.save({
+                'best_epoch': self.best_epoch,
+                'best_loss': self.best_loss,
+                'int_loss': self.int_loss,
+                'best_loss_rel' : self.best_loss_rel,
+                'best_func_count' : self.best_func_count,
+                'model_state_dict': self.best_model.state_dict()
+                },filename)
+        except:
+            print("Torch save not possible")
 
         
         pass
@@ -553,7 +576,7 @@ class PWLinManager(BasicManager):
         dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         # Explicitly setting seed to make sure that models created in two processes
         # start from same random weights and biases.
-        torch.manual_seed(42)
+        #torch.manual_seed(42)
         
         self._model = torch.nn.Sequential()
         
@@ -563,6 +586,7 @@ class PWLinManager(BasicManager):
                 PWLin(flow_size=self.n_flow, pass_through_size=n_pass_through,n_bins=n_bins,
                                                 NN_layers=NN)
             )
+            #self._model.add_module("batch", BatchLayer(self.n_flow))
             self._model.add_module("roll",RollLayer(roll_step)) #add roll layer
         self._model.to(dev)
         self.best_model=self.model
@@ -570,7 +594,72 @@ class PWLinManager(BasicManager):
         w = torch.empty(5, self.n_flow)
         torch.nn.init.uniform_(w).to(dev)
         # Do one pass forward:
-        self._model(self.format_input(w,dev))    
+        self._model(self.format_input(w,dev))   
+        
+        
+class PWQuadManager(BasicManager):
+    
+    """A manager for normalizing flows with piecewise-quadratic coupling cells interleaved with rolling layers that
+    apply cyclic permutations on the variables. All cells have the same number of pass through variables and the
+    same step size in the cyclic permutation.
+    Each coupling cell has a fully connected NN with a fixed number of layers (depth) of fixed size (width)
+
+    Hyperparameters:
+    - n_pass_through
+    - n_bins
+    - nn_width
+    - nn_depth
+    - roll_step
+    """
+
+    format_input = AddJacobian()
+    
+
+    def create_model(self,*,
+                     n_pass_through,
+                     n_cells,
+                     n_bins,
+                     NN,
+                     roll_step,
+                     **opts
+                     ):
+        """
+
+        Args:
+            n_pass_through ():
+            n_cells ():
+            n_bins:
+            NN():
+            roll_step ():
+            **opts ():
+
+        Returns:
+
+        """
+        dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        # Explicitly setting seed to make sure that models created in two processes
+        # start from same random weights and biases.
+        #torch.manual_seed(42)
+        #ACTIVATE FOR DDP
+        
+        self._model = torch.nn.Sequential()
+        
+        
+        for i_cell in range(n_cells):#create coupling cells
+            self._model.add_module(str(i_cell),
+                PWQuad(flow_size=self.n_flow, pass_through_size=n_pass_through,n_bins=n_bins,
+                                                NN_layers=NN)
+            )
+            #self._model.add_module("batch", BatchLayer(self.n_flow))
+            self._model.add_module("roll",RollLayer(roll_step)) #add roll layer
+        self._model.to(dev)
+        self.best_model=self.model
+       
+        w = torch.empty(5, self.n_flow)
+        torch.nn.init.uniform_(w).to(dev)
+        # Do one pass forward:
+        self._model(self.format_input(w,dev)) 
+        
     
 
     

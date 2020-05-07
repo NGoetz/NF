@@ -45,5 +45,28 @@ class RollLayer(torch.nn.Module):
    
     def forward(self, x):
         return torch.cat((torch.roll(x[:, :-1], self.shift, dims=-1), x[:, -1:]), axis=-1)
+    
+class BatchLayer(torch.nn.Module):
+    """
+        Layer which performs batch normalization on the coupling cell output
+    """
+    def __init__(self, n_flow):
+        super(BatchLayer, self).__init__()
+        self.batch=torch.nn.BatchNorm1d(n_flow)
+        
+
+   
+    def forward(self, x):
+        
+        y1=self.batch(x[:,:-1])
+        var=torch.var(x[:,:-1],1)
+        derv=torch.prod(self.batch.running_mean)
+        
+        for i in range(x.shape[1]-1):
+            derv=torch.div(derv,torch.sqrt(var[i]+1e-05))
+        y2=x[:,-1]*derv
+        y2=torch.unsqueeze(y2, axis=-1)
+        print(torch.cat((y1,y2), axis=-1))
+        return torch.cat((y1,y2), axis=-1)
 
 
