@@ -119,6 +119,7 @@ class BasicManager(ModelAPI):
         # Run the model once
         #torch.nn.init.normal_(w, std=10)
         self.model.to(dev)
+        dkl=torch.nn.KLDivLoss(reduction='batchmean')
         XJ = self.model(  # Pass through the model
             self.format_input(  # Append a unit Jacobian to each point
                 w,dev
@@ -128,10 +129,14 @@ class BasicManager(ModelAPI):
         if save_best:
             X=XJ[:,:-1]
             
-            fz=f(X)
+            #fz=f(X)
             J = XJ[:,-1]
-            
-            self.best_loss=torch.mean((fz*J)**2)
+            self.varJ=torch.var(J)
+            #print(X)
+            #print(torch.log(X))
+            self.DKL=dkl(torch.log(X).to(dev),w.to(dev))
+            #print(self.DKL)
+            self.best_loss=torch.mean((f(w))**2)
             self.best_model=self.model
            
             
@@ -141,6 +146,7 @@ class BasicManager(ModelAPI):
             self.best_time=0
             self.best_loss_rel=self.best_loss
             self.func_count=1
+            self.best_func_count=1
         if(_run!=None):
             _run.log_scalar("training.int_loss", self.best_loss.tolist(), 0)
            
@@ -222,15 +228,15 @@ class BasicManager(ModelAPI):
                     self.best_time=(datetime.datetime.utcnow()-_run.start_time).total_seconds()
                 else:
                     self.best_time=0
-                if i%50==0 and self.best_loss/stale_save>(1-1e-3):
+                if i%50==0 and self.best_loss/stale_save>(1-1e-4):
                     break
                 else:
                     stale_save=self.best_loss 
-                if _run!=None and self.best_time>600:
+                if _run!=None and self.best_time>700:
                     break
                 
                 
-            if save_best and loss > 1.3*self.best_loss:
+            if save_best and loss > 1.5*self.best_loss:
                 break   
         """
         writer.close()

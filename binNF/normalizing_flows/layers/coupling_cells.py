@@ -181,35 +181,33 @@ class PWQuad(torch.nn.Module):
         
         Vnorms_tot=Vnorms[:, :, -1].clone() 
         V=torch.div(V,torch.unsqueeze(Vnorms_tot,axis=-1)) 
-      
+        Wsum2=torch.cat((torch.zeros([Wsum.shape[0],Wsum.shape[1],1]).to(dev),Wsum),axis=-1)
         finder=torch.where(Wsum>torch.unsqueeze(xB,axis=-1),torch.zeros_like(Wsum),torch.ones_like(Wsum))
         
-        div_ind=torch.argmax(finder*Wsum,-1)
+        div_ind=torch.unsqueeze(torch.argmax(torch.cat((torch.empty(Wsum.shape[0],Wsum.shape[1],1)
+                                                        .fill_(1e-30).to(dev),finder*Wsum),axis=-1),axis=-1),-1)
+       # print(div_ind.shape)
         
-        div_ind=torch.unsqueeze(torch.where(div_ind==torch.empty_like(div_ind).fill_(self.n_bins-1),
-                                            torch.empty_like(div_ind).fill_(-1),div_ind),axis=-1)
         
-        Wsum2=torch.cat((torch.zeros([Wsum.shape[0],Wsum.shape[1],1]).to(dev),Wsum),axis=-1)
-        
-        alphas=torch.div((xB-torch.squeeze(torch.gather(Wsum2,-1,div_ind+1),axis=-1)),
-                         torch.squeeze(torch.gather(W,-1,div_ind+1),axis=-1))
+        alphas=torch.div((xB-torch.squeeze(torch.gather(Wsum2,-1,div_ind),axis=-1)),
+                         torch.squeeze(torch.gather(W,-1,div_ind),axis=-1))
         
         VW=torch.cat((torch.zeros([V.shape[0],V.shape[1],1]).to(dev),
-                                  Vnorms),axis=-1)
+                                  torch.cumsum(torch.mul((V[:,:,:-1]+V[:,:,1:])/2,W),axis=-1)),axis=-1)
+        #print(VW)
+        shift= torch.squeeze(torch.gather(VW,-1,div_ind),axis=-1)
         
-        shift= torch.squeeze(torch.gather(VW,-1,div_ind+1),axis=-1)
+        yB1=torch.mul((alphas**2)/2,torch.squeeze(torch.mul(torch.gather(V,-1, div_ind+1)-torch.gather(V,-1, div_ind),
+                                                            torch.gather(W,-1,div_ind)),axis=-1))
         
-        yB1=torch.mul((alphas**2)/2,torch.squeeze(torch.mul(torch.gather(V,-1, div_ind+2)-torch.gather(V,-1, div_ind+1),
-                                                            torch.gather(W,-1,div_ind+1)),axis=-1))
-        
-        yB2=torch.mul(torch.mul(alphas,torch.squeeze(torch.gather(V,-1,div_ind+1),axis=-1)),
-                                torch.squeeze(torch.gather(W,-1,div_ind+1),axis=-1))
+        yB2=torch.mul(torch.mul(alphas,torch.squeeze(torch.gather(V,-1,div_ind),axis=-1)),
+                                torch.squeeze(torch.gather(W,-1,div_ind),axis=-1))
        
         yB=yB1+yB2+shift
         
         
-        jacobian=jacobian*torch.unsqueeze(torch.prod(torch.lerp(torch.squeeze(torch.gather(V,-1,div_ind+1),axis=-1),
-                                                torch.squeeze(torch.gather(V,-1,div_ind+2),axis=-1),alphas), axis=-1),axis=-1)
+        jacobian=jacobian*torch.unsqueeze(torch.prod(torch.lerp(torch.squeeze(torch.gather(V,-1,div_ind),axis=-1),
+                                                torch.squeeze(torch.gather(V,-1,div_ind+1),axis=-1),alphas), axis=-1),axis=-1)
        
         return torch.cat((xA, yB, jacobian), axis=-1) 
         

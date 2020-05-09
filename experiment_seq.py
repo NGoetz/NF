@@ -12,7 +12,7 @@ ex = Experiment()
 #ex.observers.append(MongoObserver(url='92.194.61.224:27017',
                                   #db_name='MY_DB'))
 
-ex.observers.append(FileStorageObserver('logs/sacred/runs3'))
+ex.observers.append(FileStorageObserver('logs/sacred/runs4'))
 
 
 def camel(x):
@@ -24,15 +24,15 @@ def cfg():
     n_flow=2
     n_pass_through=1
     n_cells=2
-    n_bins=25
-    NN_length=5
-    NN_width=10
-    lr=3e-4
-    weight_decay=1e-7
-    batch_size=9000
+    n_bins=14
+    NN_length=11
+    NN_width=9
+    lr=0.0008836012333631516
+    weight_decay=2.7868446750289877e-07
+    batch_size=10
     epoch_length=10000
     f=camel
-    logdir='logs/sacred/runs3'
+    logdir='logs/sacred/runs4'
     q=m.Queue()
     dev=0
     
@@ -73,8 +73,11 @@ def run(_run,n_flow,n_pass_through, n_cells, n_bins, NN_length, NN_width, lr, we
     if(_run!=None):
             _run.log_scalar("training.a_val_loss", loss.tolist(), 0)
             _run.log_scalar("training.a_val_loss_rel", (loss_rel).tolist(), 0)
+            _run.log_scalar("training.b_varJ", (NF.varJ).tolist(), 0)
+            _run.log_scalar("training.b_DKL", (NF.DKL).tolist(), 0)
+            
     
-    q.put((loss.tolist(), _run._id,loss_rel.tolist(),NF.best_func_count))
+    q.put((loss.tolist(), _run._id,loss_rel.tolist(),NF.best_func_count, NF.varJ.tolist(), NF.DKL.tolist(),))
     pass
 """
     w = torch.empty((12100,2)) 
