@@ -39,9 +39,7 @@ class AffineCoupling(torch.nn.Module):
        
          
         NN_layers.append((torch.nn.Linear(oldsize,sizes[-1])))
-        #NN_layers.append(torch.nn.BatchNorm1d(sizes[-1]))
        
-       # NN_layers.append(torch.nn.Sigmoid())
         
         NN_layers.append(Reshape(2, self.transform_size))
         #we construct a Sequential module from our NN
@@ -55,7 +53,7 @@ class AffineCoupling(torch.nn.Module):
         shift_rescale = self.NN(xA) #The NN is evaluated on the pass-through dimensons
         z=torch.ones_like(shift_rescale[:,0])
         s0=shift_rescale[:,0]
-        #s1=50*torch.tan(np.pi*(shift_rescale[:,1]-0.5))
+       
         s1=8*shift_rescale[:,1]-4
         yB = torch.mul(xB, s0) + s1 #xB is transformed. 
         
@@ -151,10 +149,11 @@ class PWQuad(torch.nn.Module):
         sizes = NN_layers + [( self.transform_size*(2*self.n_bins+1))]
         self.NN=RectNN(pass_through_size,sizes,(self.transform_size,(2*self.n_bins+1))).NN
         
-    def forward(self, x): #CUDA
+    def forward(self, x): 
      
         xA = x[:, :self.pass_through_size]
         xB = x[:, self.pass_through_size:self.flow_size]
+        xB=torch.where(xB>(torch.ones_like(xB)-1e-6),(torch.ones_like(xB)-1e-6),xB)
         
         jacobian = torch.unsqueeze(x[:, self.flow_size], -1)
         Z=self.NN(xA)
@@ -186,15 +185,14 @@ class PWQuad(torch.nn.Module):
         
         div_ind=torch.unsqueeze(torch.argmax(torch.cat((torch.empty(Wsum.shape[0],Wsum.shape[1],1)
                                                         .fill_(1e-30).to(dev),finder*Wsum),axis=-1),axis=-1),-1)
-       # print(div_ind.shape)
         
+
         
         alphas=torch.div((xB-torch.squeeze(torch.gather(Wsum2,-1,div_ind),axis=-1)),
                          torch.squeeze(torch.gather(W,-1,div_ind),axis=-1))
         
         VW=torch.cat((torch.zeros([V.shape[0],V.shape[1],1]).to(dev),
                                   torch.cumsum(torch.mul((V[:,:,:-1]+V[:,:,1:])/2,W),axis=-1)),axis=-1)
-        #print(VW)
         shift= torch.squeeze(torch.gather(VW,-1,div_ind),axis=-1)
         
         yB1=torch.mul((alphas**2)/2,torch.squeeze(torch.mul(torch.gather(V,-1, div_ind+1)-torch.gather(V,-1, div_ind),

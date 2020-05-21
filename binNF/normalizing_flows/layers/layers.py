@@ -6,6 +6,49 @@ def tanp(input):
     return (1+((torch.tan((input-0.5)*np.pi))**2))*np.pi   #derivative for jacobian    
 
 
+class MaskLayer(torch.nn.Module):
+    """
+        Masking layer
+    """
+    def __init__(self, dims_bin, pos,dev):
+        super().__init__()
+     
+        
+        
+        feed=pos%2
+        trafo=(pos+1)%2
+        
+        pos=int(np.floor(pos/2))
+        
+        masker=dims_bin[:,pos]
+        
+        self.feeder=(masker == feed).nonzero().to(dev)
+        self.trafoer=(masker == trafo).nonzero().to(dev)
+        self.pass_through=self.feeder.shape[0]
+       
+
+    def forward(self, tensor):
+      
+        return torch.cat((torch.index_select(tensor, -1, self.feeder.view(-1)),
+                          torch.index_select(tensor, -1, self.trafoer.view(-1)),
+                          tensor[:,-1:]),-1)
+    
+class DeMaskLayer(torch.nn.Module):
+    """
+        DeMasking layer
+    """
+    def __init__(self, first, second):
+        super().__init__()
+        self.list_ind=torch.unsqueeze(torch.squeeze(torch.cat((first,second),0),-1),0)
+        
+
+    def forward(self, tensor):
+        
+        t=torch.ones_like(tensor[:,:-1],dtype=torch.int16)
+        lister=self.list_ind*t
+        
+        return torch.cat((torch.gather(tensor[:,:-1], -1,lister),tensor[:,-1:]),-1)
+
 
 
 class Reshape(torch.nn.Module):

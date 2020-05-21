@@ -1,6 +1,7 @@
 import torch
 from binNF.normalizing_flows.manager import *
 import matplotlib
+from pathlib import Path
 matplotlib.use('tkagg')
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,44 +9,53 @@ from sacred import Experiment
 from sacred.observers import FileStorageObserver
 from multiprocessing import Process,Queue,Manager
 ex = Experiment()
+LOGDIR='logs/sacred/mfruns1'
 
 #ex.observers.append(MongoObserver(url='92.194.61.224:27017',
                                   #db_name='MY_DB'))
 
-ex.observers.append(FileStorageObserver('logs/sacred/runs4'))
+
 
 
 def camel(x):
     return torch.exp( -((x[:,0]-0.75)**2+(x[:,1]-0.75)**2)/(0.2**2))+torch.exp( -((x[:,0]-0.25)**2+(x[:,1]-0.25)**2)/(0.2**2))
 
+def ex_init(logdir):
+    LOGDIR=logdir
+    ex.observers.append(FileStorageObserver(LOGDIR))
+
 @ex.config
 def cfg():
     m=Manager()
     n_flow=2
-    n_pass_through=1
     n_cells=2
-    n_bins=14
-    NN_length=11
-    NN_width=9
-    lr=0.0008836012333631516
-    weight_decay=2.7868446750289877e-07
-    batch_size=10
+    n_bins=7
+    NN_length=5
+    NN_width=11
+    lr=2e-3
+    weight_decay=5e-07
+    batch_size=80000
     epoch_length=10000
     f=camel
-    logdir='logs/sacred/runs4'
+    logdir='logs/sacred/mfruns1'
     q=m.Queue()
     dev=0
+    gn=1
+    gw=1
+    internal_id=0
+
     
     
 
 
 @ex.capture
-def run(_run,n_flow,n_pass_through, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, batch_size, epoch_length, f, logdir,q,dev):
+def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, batch_size, epoch_length, f, logdir,q,dev, internal_id):
+    
     
     # We define our NormalizingFlow object 
     NF =  PWQuadManager(n_flow=n_flow)
 
-    NF.create_model(n_pass_through=n_pass_through,n_cells=n_cells, n_bins=n_bins, NN=[NN_width]*NN_length, roll_step=1)
+    NF.create_model(n_cells=n_cells, n_bins=n_bins, NN=[NN_width]*NN_length, dev=dev)
     optim = torch.optim.Adamax(NF._model.parameters(),lr=lr, weight_decay=weight_decay) 
 
     NF._train_variance_forward_seq(f,optim,logdir,batch_size,epoch_length,0,True, False,True,_run,dev)
@@ -73,11 +83,13 @@ def run(_run,n_flow,n_pass_through, n_cells, n_bins, NN_length, NN_width, lr, we
     if(_run!=None):
             _run.log_scalar("training.a_val_loss", loss.tolist(), 0)
             _run.log_scalar("training.a_val_loss_rel", (loss_rel).tolist(), 0)
+            _run.log_scalar("training.a_val_loss_var", NF.best_var.tolist(),0)
             _run.log_scalar("training.b_varJ", (NF.varJ).tolist(), 0)
             _run.log_scalar("training.b_DKL", (NF.DKL).tolist(), 0)
             
     
-    q.put((loss.tolist(), _run._id,loss_rel.tolist(),NF.best_func_count, NF.varJ.tolist(), NF.DKL.tolist(),))
+    q.put((loss.tolist(), _run._id,loss_rel.tolist(),NF.best_func_count, NF.varJ.tolist(),
+           NF.DKL.tolist(),NF.best_var.tolist(), NF.best_epoch,"NIS",NF.best_time,internal_id))
     pass
 """
     w = torch.empty((12100,2)) 
