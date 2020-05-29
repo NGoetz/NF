@@ -47,7 +47,7 @@ def run(_run,n_flow,n_pass_through, n_cells, n_bins, NN_length, NN_width, lr, we
     start_time=datetime.datetime.utcnow()
     m = vegas.AdaptiveMap([[0, 1]]*n_flow, ninc=ngrid)
     #we gave NIS 3 000 000 evaluations -> 10 iterations * 300000 y's  ... 5 iterations till adaption
-    ny = np.int(30000*np.sqrt(n_flow))
+    ny = np.int(30000*np.sqrt(n_flow/2))
     y = np.random.uniform(0., 1., (ny, n_flow)) 
     x = np.empty(y.shape, float)           
     jac = np.empty(y.shape[0], float)
@@ -67,11 +67,6 @@ def run(_run,n_flow,n_pass_through, n_cells, n_bins, NN_length, NN_width, lr, we
         m.add_training_data(y, f2)           # adapt
         m.adapt(alpha=1)
 
-
-        m.map(y, x, jac)                     # compute x's and jac
-        loss=0
-        for j in range(ny):                  # compute training data
-            f2[j] = (jac[j] * f(x[j])) ** 2
 
     loss=np.mean(f2)
     lossvar=np.var(f2)/ny

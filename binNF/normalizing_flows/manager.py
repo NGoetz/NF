@@ -7,6 +7,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm.autonotebook import tqdm
 from .layers.coupling_cells import  AffineCoupling, PWLin, PWQuad
 from .layers.layers import *
+from .misc import tqdm_recycled
 from statistics import mean
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
@@ -80,7 +81,7 @@ class BasicManager(ModelAPI):
 
     
     def _train_variance_forward_seq(self, f, optimizer_object, logdir, batch_size = 10000, epochs=10, epoch_start=0,
-                                logging=True, pretty_progressbar=True,  save_best=True, _run=None,n=0,
+                                logging=True, pretty_progressbar=True,  save_best=True, _run=None,n=0,mini_batch_size=20000,
                                 **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
@@ -102,6 +103,9 @@ class BasicManager(ModelAPI):
         """
         
         dev = torch.device("cuda:"+str(n)) if torch.cuda.is_available() else torch.device("cpu")
+        
+        assert mini_batch_size<=batch_size, "The minibatch size must be smaller than the batch size"
+        n_minibatches = int(batch_size/mini_batch_size)
         
         if(_run!=None): 
             filename=logdir+"/"+str(_run._id)+"/torch"
@@ -132,16 +136,22 @@ class BasicManager(ModelAPI):
         # Instantiate a pretty progress bar if needed
         if pretty_progressbar:
             epoch_progress = tqdm(range(epoch_start,epoch_start+epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
+            # Instantiate a pretty progress bar for the minibatch loop if it is not trivial
+            if n_minibatches>1:
+                minibatch_progress = tqdm_recycled(range(n_minibatches), leave=False, desc="Step")
+            else:
+                minibatch_progress = range(n_minibatches)
+
         else:
             epoch_progress = range(epoch_start, epoch_start+epochs)
-           
+            minibatch_progress = range(n_minibatches)
         """
 #######################################
         # Keep track of metric history if needed
         if logging:
             history = {}
         """
-        w = torch.empty(batch_size, self.n_flow)
+        w = torch.empty(mini_batch_size, self.n_flow)
        # 
         
         torch.nn.init.uniform_(w).to(dev)  # Generate a batch of points in latent space
@@ -179,7 +189,7 @@ class BasicManager(ModelAPI):
            
             
             self.int_loss=self.best_loss
-            self.best_var=torch.var((f(X)*J)**2)/batch_size
+            self.best_var=(torch.var((f(X)*J)**2)/mini_batch_size).detach()
             #print(self.best_var)
             self.best_epoch=0
             self.best_time=0
@@ -194,50 +204,63 @@ class BasicManager(ModelAPI):
     
         #torch.initial_seed()
         stale_save=1000
+        preburner=True
+      
+        counter=0
+        last_loss=1000
         for i in epoch_progress:
             loss = 0
-            std = 0
+            var = 0
             optimizer_object.zero_grad()
-            
-            #if(i%5==0):
-            w = torch.empty(batch_size, self.n_flow)
-            
-            #torch.nn.init.normal_(w, std=10)
-            #"""
-            torch.nn.init.uniform_(w).to(dev)
-            #Y=150*torch.tan((w-0.5)*(np.pi))
-            #"""
-            
-            XJ = self.model(                                            # Pass through the model
-                self.format_input(                                      # Append a unit Jacobian to each point
-                    #Y# Generate a batch of points in latent space
-                    w,dev
-                )
-            )
-
-            
-            # Separate the points and their Jacobians:
-            # This sample is fixed, we optimize the Jacobian
-            X = (XJ[:, :-1]).detach()
-            #Z=torch.atan(X/100)/(100*np.pi)+0.5
-           
-            
-            #jacs=torch.mul(torch.abs(torch.prod(tanp(w),axis=-1)),torch.abs(torch.prod(atanp(X),axis=-1)))
-            """
-            fz=torch.mul(f(X).detach(),torch.abs(torch.prod(tanp(w),axis=-1)))
-            """
-            #fz=torch.div(f(X).detach(),normal(X,0,10,self.n_flow))
-            
-            fXJ = torch.mul(f(X), XJ[:, -1])
-            self.func_count=self.func_count+1
-            # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
-            loss = torch.mean(fXJ**2)
-            var=torch.var(fXJ**2)/batch_size # variance of the mean is variance/N
-            
-           
-            loss.backward()
-            #print(loss)
+            w = torch.empty(mini_batch_size, self.n_flow).to(dev)
+            for j in minibatch_progress:
+               # if(i%3==0):
                 
+
+                #torch.nn.init.normal_(w, std=10)
+                #"""
+                torch.nn.init.uniform_(w)
+                #Y=150*torch.tan((w-0.5)*(np.pi))
+                #"""
+                #print("run")
+                #w.requires_grad=True
+                XJ = self.model(                                            # Pass through the model
+                    self.format_input(                                      # Append a unit Jacobian to each point
+                        #Y# Generate a batch of points in latent space
+                        w,dev
+                    )
+                )
+
+                #print(XJ)
+                # Separate the points and their Jacobians:
+                # This sample is fixed, we optimize the Jacobian
+                X = (XJ[:, :-1]).detach()
+                #Z=torch.atan(X/100)/(100*np.pi)+0.5
+
+
+                #jacs=torch.mul(torch.abs(torch.prod(tanp(w),axis=-1)),torch.abs(torch.prod(atanp(X),axis=-1)))
+                """
+                fz=torch.mul(f(X).detach(),torch.abs(torch.prod(tanp(w),axis=-1)))
+                """
+                #fz=torch.div(f(X).detach(),normal(X,0,10,self.n_flow))
+                #if(i<30 and 2*j>i):
+                if(preburner):
+                    fXJ=torch.mul(f(w), XJ[:, -1])
+                else:
+                    fXJ = torch.mul(f(X), XJ[:, -1])
+                self.func_count=self.func_count+1
+                # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
+                loss+= torch.mean(fXJ**2)
+                var+=float(torch.var(fXJ**2)/mini_batch_size) # variance of the mean is variance/N
+                del X, fXJ, XJ
+                
+            
+            loss=loss/n_minibatches
+            
+                
+            
+            loss.backward()
+            
             optimizer_object.step()
             
             
@@ -259,29 +282,48 @@ class BasicManager(ModelAPI):
             writer.add_scalar('loss', float(loss),i)
             writer.add_scalar('std', float(std),i)
             """
-            if save_best and i==0:
-                self.best_loss=loss
-            if save_best and loss < self.best_loss:
+            
+            if save_best and (loss < self.best_loss) and not preburner:
                 self.best_loss = loss
                 self.best_var=var
                 self.best_loss_rel=loss/self.int_loss
                 self.best_model=copy.deepcopy(self.model)
                 self.best_epoch=i
-                self.best_func_count=self.func_count*batch_size
+                self.best_func_count=self.func_count*mini_batch_size
+               
                 if(_run!=None):
                     self.best_time=(datetime.datetime.utcnow()-_run.start_time).total_seconds()
                 else:
                     self.best_time=0
-                if i%50==0 and self.best_loss/stale_save>(1-1e-5):
-                    break
-                else:
-                    stale_save=self.best_loss 
-                if _run!=None and self.best_time>1800:
-                    break
                 
+                    
+            if loss<last_loss:
+                counter=0
+            else:
+                counter+=1
+                if counter>5 and preburner:
+                    counter=0
+                    preburner=False
+                elif counter>5:
+                    break
+            last_loss=loss
+            if i%75==0 and i>100 and self.best_loss/stale_save>(1-1e-3) and not preburner:
+                break
+            else:
+                stale_save=self.best_loss 
+            if _run!=None and self.best_time>1800:
+                break
+           
+        
+            if preburner and (loss<0.2*self.best_loss or i>75):
+                
+                preburner=False
             
-            if save_best and (loss > 1.75*self.best_loss or i-self.best_epoch>150):
-                break   
+            #if save_best and (loss > 1.75*self.best_loss*self.n_flow/2 or i-self.best_epoch>150) and i>pre_i+5:
+            #    break   
+           
+            
+            
         """
         writer.close()
         
@@ -685,9 +727,9 @@ class PWQuadManager(BasicManager):
         Returns:
 
         """
-        if(n_cells<2*np.log2(self.n_flow) and n_cells<self.n_flow):
+        if(n_cells<2*np.ceil(np.log2(self.n_flow)) and n_cells<self.n_flow):
             print("WARNING: Too few coupling cells!")
-        
+        dev = torch.device("cuda:"+str(dev)) if torch.cuda.is_available() else torch.device("cpu")
        
         
         self._model = torch.nn.Sequential()
@@ -708,6 +750,8 @@ class PWQuadManager(BasicManager):
                     self._model.add_module("roll"+str(i_cell),RollLayer(roll_step)) #add roll layer
                 else:
                      self._model.add_module("roll"+str(i_cell),RollLayer(self.n_flow-((n_cells-1)%self.n_flow)))
+                    
+                     
                 
         else:
             roll_step=1
@@ -715,6 +759,7 @@ class PWQuadManager(BasicManager):
             dims=torch.arange(self.n_flow)
             n=len(get_bin(self.n_flow-1,0))
             dims_bin=torch.ones(self.n_flow,n)
+            
             dims_bin=torch.IntTensor(list(map(get_bin, dims,[n]*self.n_flow))).to(dev)
             
             for i_cells in range(2*n):#create coupling cells
@@ -735,13 +780,25 @@ class PWQuadManager(BasicManager):
                     self._model.add_module("roll"+str(i_cells+2*n),RollLayer(roll_step)) #add roll layer
                 else:
                     self._model.add_module("roll"+str(i_cells+2*n),RollLayer(self.n_flow-((n_cells-2*n-1)%self.n_flow)))
+                    
             
             
         self._model.to(dev)
         self.best_model=self.model
        
         w = torch.empty(5, self.n_flow)
+        #print(w.shape)
         torch.nn.init.uniform_(w).to(dev)
+        ####
+        """
+        w=torch.arange(1.,self.n_flow+1)
+        print(w.shape)
+        w=torch.unsqueeze(w,0)
+        print(w.shape)
+        w=torch.cat((w,w),0)
+        print(w)
+        ##
+        """
         # Do one pass forward:
         self._model(self.format_input(w,dev)) 
         

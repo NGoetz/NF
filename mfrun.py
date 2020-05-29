@@ -22,12 +22,12 @@ def create_fun(gn, gw):
     
     if(gn==1):
         def f(x):
-                return torch.sum(torch.exp(-(x-0.5)**2/(gw**2)),-1)
+                return torch.exp(-torch.sum((x-0.5)**2/(gw**2),-1))
         return f
     
     if(gn==2):
         def f(x):
-                return torch.sum(torch.exp(-(x-0.25)**2/(gw**2))+torch.exp(-(x-0.75)**2/(gw**2)),-1)
+                return torch.exp(-torch.sum((x-0.25)**2/(gw**2),-1))+torch.exp(-torch.sum((x-0.75)**2/(gw**2),-1))
         return f
     
     if(gn==4):
@@ -37,8 +37,7 @@ def create_fun(gn, gw):
             lim=int((shift.shape[1]/2))
             shift2=torch.cat((shift[:,:lim],shift1[:,lim:]),-1)
             shift3=torch.cat((shift1[:,:lim],shift[:,lim:]),-1)
-            return torch.sum(torch.exp(-(x-shift)**2/(gw**2))+torch.exp(-(x-shift1)**2/(gw**2))+
-                             torch.exp(-(x-shift2)**2/(gw**2))+torch.exp(-(x-shift3)**2/(gw**2)),-1)
+            return torch.exp(-torch.sum((x-shift)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift1)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift2)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift3)**2/(gw**2),-1))
         return f
     
     if(gn==8):
@@ -52,22 +51,19 @@ def create_fun(gn, gw):
             shift5=torch.cat((shift[:,:2*lim],shift1[:,2*lim:]),-1) #001
             shift6=torch.cat((shift1[:,:lim],shift[:,lim:2*lim],shift1[:,2*lim:]),-1) #101
             shift7=torch.cat((shift[:,:lim],shift1[:,lim:]),-1) #011
-            return torch.sum(torch.exp(-(x-shift)**2/(gw**2))+torch.exp(-(x-shift1)**2/(gw**2))+
-                             torch.exp(-(x-shift2)**2/(gw**2))+torch.exp(-(x-shift3)**2/(gw**2))+
-                             torch.exp(-(x-shift4)**2/(gw**2))+torch.exp(-(x-shift5)**2/(gw**2))+
-                             torch.exp(-(x-shift6)**2/(gw**2))+torch.exp(-(x-shift7)**2/(gw**2)),-1)
+            return torch.exp(-torch.sum((x-shift)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift1)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift2)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift3)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift4)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift5)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift6)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift7)**2/(gw**2),-1))
         return f
     
 def create_funv(gn, gw):
     
     if(gn==1):
         def f(x):
-                return np.sum(np.exp(-(x-0.5)**2/(gw**2)),-1)
+                return np.exp(-np.sum((x-0.5)**2/(gw**2),-1))
         return f # peak at [0.5,...,0.5]
     
     if(gn==2):
         def f(x):
-                return np.sum(np.exp(-(x-0.25)**2/(gw**2))+np.exp(-(x-0.75)**2/(gw**2)),-1)
+                return np.exp(-np.sum((x-0.25)**2/(gw**2),-1))+np.exp(-np.sum((x-0.75)**2/(gw**2),-1))
         return f  #peak at [0.25,...,0.25] and [0.75,...,0.75]
     
     if(gn==4):
@@ -78,8 +74,7 @@ def create_funv(gn, gw):
             lim=int((shift.shape[0]/2))
             shift2=np.concatenate((shift[:lim],shift1[lim:]),-1)
             shift3=np.concatenate((shift1[:lim],shift[lim:]),-1)
-            return np.sum(np.exp(-(x-shift)**2/(gw**2))+np.exp(-(x-shift1)**2/(gw**2))+
-                          np.exp(-(x-shift2)**2/(gw**2))+np.exp(-(x-shift3)**2/(gw**2)),-1)
+            return np.exp(-np.sum((x-shift)**2/(gw**2),-1))+np.exp(-np.sum((x-shift1)**2/(gw**2),-1))+np.exp(-np.sum((x-shift2)**2/(gw**2),-1))+np.exp(-np.sum((x-shift3)**2/(gw**2),-1))
         return f #peak at [0.25,...,0.25], [0.75,...,0.75],[0.25,...,0.75], [0.25,...,0.75]
                 #in dim4, there would be in the [0,1] plane only two peaks, as two are identical
                 # other than gn=2, the [1,2] plane has 4 peaks
@@ -96,20 +91,17 @@ def create_funv(gn, gw):
             shift5=np.concatenate((shift[:2*lim],shift1[2*lim:]),0) #001
             shift6=np.concatenate((shift1[:lim],shift[lim:2*lim],shift1[2*lim:]),0) #101
             shift7=np.concatenate((shift[:lim],shift1[lim:]),0) #011
-            return np.sum(np.exp(-(x-shift)**2/(gw**2))+np.exp(-(x-shift1)**2/(gw**2))+
-                          np.exp(-(x-shift2)**2/(gw**2))+np.exp(-(x-shift3)**2/(gw**2))+
-                          np.exp(-(x-shift4)**2/(gw**2))+np.exp(-(x-shift5)**2/(gw**2))+
-                          np.exp(-(x-shift6)**2/(gw**2))+np.exp(-(x-shift7)**2/(gw**2)),-1)
+            return np.exp(-np.sum((x-shift)**2/(gw**2),-1))+np.exp(-np.sum((x-shift1)**2/(gw**2),-1))+np.exp(-np.sum((x-shift2)**2/(gw**2),-1))+np.exp(-np.sum((x-shift3)**2/(gw**2),-1))+ np.exp(-np.sum((x-shift4)**2/(gw**2),-1))+np.exp(-np.sum((x-shift5)**2/(gw**2),-1))+np.exp(-np.sum((x-shift6)**2/(gw**2),-1))+np.exp(-np.sum((x-shift7)**2/(gw**2),-1))
         return f #here, in [0,1] plane there are actually 4 peaks
               
 if __name__ == '__main__':
   
     gpus=4
-    hypopt_n=50
-    n_bins_r=(5,15)
-    lr_r=(1e-6,1e-2)
-    weight_decay_r=(1e-8,1e-5)
-    batch_size_r=(20000,40000)#20000,50000
+    hypopt_n=30
+    n_bins_r=(4,13)
+    lr_r=(1e-6,2e-2)
+    weight_decay_r=(1e-7,1e-4)
+    batch_size_r=(60000,100000)#20000,50000
     
     
     best_loss_rel=1000
@@ -118,16 +110,17 @@ if __name__ == '__main__':
     exdict={}
     exdictv={}
     i=0
-    logdir='logs/sacred/mfruns1'
-    
+    logdir='logs/sacred/mfruns7'
+    #higher dim->bigger NN, need 10/15 for dim 8; #5,11 gives good results
     for nnl in my_range(5,10,5): #4,10,1
-        for nnw in my_range(7,15,13): #7,20,2  #15
+        for nnw in my_range(7,15,4): #7,20,2  #15
             for dim in exp_range(32,32,2): #exp(2,32,2)
-                for cc in my_range(int(np.ceil(2*np.log2(dim))), int(np.ceil(2*np.log2(dim))),1): 
+                for cc in my_range(int(2*np.ceil(np.log2(dim))), int(2*np.ceil(np.log2(dim))),1): 
                     #int(np.ceil(2*np.log2(dim))), dim,1, 
-                        for gn in exp_range(4,8,2): #exp 1,8,2
-                            for gw in my_range(0.05,0.15,0.1): #0.05,0.3,0.05
+                        for gn in exp_range(1,8,2): #exp 1,8,2 limit by dim!
+                            for gw in my_range(0.2,0.25,0.05): #0.1,0.3,0.05 #>0.15
                                 f=create_fun(gn,gw)
+                                
                                 fv=create_funv(gn,gw)
                                 exdict[str(i)]={"n_flow":dim,"NN_length":nnl, "NN_width": nnw, "n_cells":cc,
                                                 "f": f, "logdir":logdir, "gn": gn, "gw": gw}
@@ -136,6 +129,7 @@ if __name__ == '__main__':
                                 
 
     ex_n=len(exdict)
+    
     print(str(len(exdict)*(hypopt_n+gpus)))
     cfgdict={}
     for i in range(ex_n):
@@ -169,7 +163,7 @@ if __name__ == '__main__':
                 hyp_cfg=cfgdict[str(i)+";"+str(j)]
                 j=j+1
                 
-                hyp_cfg['dev']=n+1
+                hyp_cfg['dev']=n
                 hyp_cfg['q']=q
                 z = ex_cfg.copy()
                 z.update(hyp_cfg)
@@ -184,7 +178,7 @@ if __name__ == '__main__':
                     res=q.get()
                     hyp_res[str(res[1])]={'best_loss':res[0],'best_loss_rel':res[2],'best_count':res[3], 'loss_var': res[6], 
                                       'best_epoch': res[7], 'dim': z['n_flow'], "gn": z['gn'],
-                                      "gw": z['gw'], "time":res[9] }
+                                      "gw": z['gw'],"nnl": z['NN_length'], "nnw":z['NN_width'], "time":res[9] }
                     if(res[0]<best_loss):  
                         best_loss=res[0]
                         best_id=res[10]
@@ -192,29 +186,31 @@ if __name__ == '__main__':
         exdict[str(i)].update(cfgdict[str(i)+";"+str(best_id)])
         time_total[str(i)]=(datetime.datetime.utcnow()-start_time).total_seconds()
     hyp_res_sort = sorted((value['gn'], value['gw'], value['dim'],value['best_loss'],value['best_loss_rel'],
-                           value['loss_var'], value['best_epoch'], value['best_count'],value['time'],
-                           key) for (key,value) in hyp_res.items())
+                           value['loss_var'], value['best_epoch'], value['best_count'],value['time'], value['nnl'],
+                           value['nnw'],key) for (key,value) in hyp_res.items())
     filename_hyp=logdir+'/hypopt/list'
     file_hyp= open(filename_hyp,"w+")
-    file_hyp.write('ID, number of peaks, width of peaks, dimensions, best_loss, best_loss_rel,'+
+    file_hyp.write('ID, number of peaks, width of peaks, NN_length, NN_width, dimensions, best_loss, best_loss_rel,'+
                'var_loss, best_epoch, best_count, time \n')
+    file_hyp.close()
     
     for k in hyp_res_sort:
-        file_hyp.write(str(k[9])+', '+str(k[0])+', '+str(k[1])+', '+str(k[2])
+        file_hyp= open(filename_hyp,"a")
+        file_hyp.write(str(k[11])+', '+str(k[0])+', '+str(k[1])+', '+str(k[9])+', '+str(k[10])+', '+str(k[2])
                    +', '+str(k[3])+', '+str(k[4])+', '+str(k[5])+
                    ', '+str(k[6])+', '+str(k[7])+', '+str(k[8]))
         file_hyp.write("\n")
-    file_hyp.close() 
+        file_hyp.close() 
                     
-    print(time_total)            
+    #print(time_total)            
     ex_init(logdir+"/NIS")
     exv_init(logdir+"/VEGAS")
     resdict={}
     filename=logdir+'/list'
     file= open(filename,"w+")
-    file.write('ID, number of peaks, width of peaks, dimensions, modus, best_loss, best_loss_rel,'+
+    file.write('ID, number of peaks, width of peaks, NN_length, NN_width,dimensions, modus, best_loss, best_loss_rel,'+
                'var_loss, best_epoch, best_count, time, time_total\n')
-    
+    file.close()
     for i in range(ex_n):
         processes = []
         m=Manager()
@@ -223,15 +219,15 @@ if __name__ == '__main__':
                 break
         run_cfg=exdict[str(i)]
         run_cfgv=exdictv[str(i)]
-        for n in range(gpus):
+        for n in range(gpus+1):
             run_cfg['q']=q
-            run_cfg['dev']=n
+            run_cfg['dev']=n-1
             run_cfgv['q']=q
             config_updates={}
             config_updatesv={}
             config_updates['config_updates']=run_cfg
             config_updatesv['config_updates']=run_cfgv
-            if n>0:
+            if n>=0:
                 p = Process(target=ex.run, kwargs=config_updates)
             else:
                 p=Process(target=exv.run, kwargs=config_updatesv) 
@@ -243,15 +239,18 @@ if __name__ == '__main__':
                 res=q.get()
                 resdict[str(res[1])]={'best_loss':res[0],'best_loss_rel':res[2],'best_count':res[3], 'loss_var': res[6], 
                                       'best_epoch': res[7], 'dim': run_cfg['n_flow'], "gn": run_cfg['gn'],
-                                      "gw": run_cfg['gw'], "modus": res[8], "time":res[9] }
+                                      "gw": run_cfg['gw'], "modus": res[8], "time":res[9], "nnl": run_cfg['NN_length'],
+                                      "nnw": run_cfg['NN_width'] }
                
     for (key,value) in resdict.items():
        
         total_time=time_total[str(i)]+value['time']
-        file.write(str(key) +', '+str(value['gn'])+', '+str(value['gw'])+', '+str(value['dim'])+', '+
+        file=open(filename,"a")
+        file.write(str(key) +', '+str(value['gn'])+', '+str(value['gw'])+', '+str(value['nnl'])+', '+str(value['nnw'])
+                   +', '+str(value['dim'])+', '+
                    str(value['modus'])+', '+str(value['best_loss'])
                    +', '+str(value['best_loss_rel'])+', '+str(value['loss_var'])+
                    ', '+str(value['best_epoch'])+', '+str(value['best_count'])
                    +', '+str(value['time'])+','+str(total_time))
         file.write("\n")
-    file.close() 
+        file.close() 

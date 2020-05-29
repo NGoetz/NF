@@ -9,35 +9,63 @@ from sacred import Experiment
 from sacred.observers import FileStorageObserver
 from multiprocessing import Process,Queue,Manager
 ex = Experiment()
-LOGDIR='logs/sacred/mfruns1'
-
-#ex.observers.append(MongoObserver(url='92.194.61.224:27017',
-                                  #db_name='MY_DB'))
+LOGDIR='logs/sacred/single'
+ex.observers.append(FileStorageObserver(LOGDIR))
 
 
 
 
-def camel(x):
-    return torch.exp( -((x[:,0]-0.75)**2+(x[:,1]-0.75)**2)/(0.2**2))+torch.exp( -((x[:,0]-0.25)**2+(x[:,1]-0.25)**2)/(0.2**2))
 
-def ex_init(logdir):
-    LOGDIR=logdir
-    ex.observers.append(FileStorageObserver(LOGDIR))
+def create_fun(gn, gw):
+    
+    if(gn==1):
+        def f(x):
+                return torch.exp(-torch.sum((x-0.5)**2/(gw**2),-1))
+        return f
+    
+    if(gn==2):
+        def f(x):
+                return torch.exp(-torch.sum((x-0.25)**2/(gw**2),-1))+torch.exp(-torch.sum((x-0.75)**2/(gw**2),-1))
+        return f
+    
+    if(gn==4):
+        def f(x):
+            shift=torch.ones_like(x)*0.25
+            shift1=shift.clone()*3
+            lim=int((shift.shape[1]/2))
+            shift2=torch.cat((shift[:,:lim],shift1[:,lim:]),-1)
+            shift3=torch.cat((shift1[:,:lim],shift[:,lim:]),-1)
+            return torch.exp(-torch.sum((x-shift)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift1)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift2)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift3)**2/(gw**2),-1))
+        return f
+    
+    if(gn==8):
+        def f(x):
+            shift=torch.ones_like(x)*0.25#000
+            shift1=shift.clone()*3#111
+            lim=int((shift.shape[1]/3))
+            shift2=torch.cat((shift[:,:lim],shift1[:,lim:2*lim],shift[:,2*lim:]),-1) #010
+            shift3=torch.cat((shift1[:,:lim],shift[:,lim:]),-1)#100
+            shift4=torch.cat((shift1[:,:lim],shift1[:,lim:2*lim],shift[:,2*lim:]),-1) #110
+            shift5=torch.cat((shift[:,:2*lim],shift1[:,2*lim:]),-1) #001
+            shift6=torch.cat((shift1[:,:lim],shift[:,lim:2*lim],shift1[:,2*lim:]),-1) #101
+            shift7=torch.cat((shift[:,:lim],shift1[:,lim:]),-1) #011
+            return torch.exp(-torch.sum((x-shift)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift1)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift2)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift3)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift4)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift5)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift6)**2/(gw**2),-1))+torch.exp(-torch.sum((x-shift7)**2/(gw**2),-1))
+        return f
 
 @ex.config
 def cfg():
     m=Manager()
-    n_flow=2
-    n_cells=2
+    n_flow=9
+    n_cells=8
     n_bins=7
     NN_length=5
     NN_width=11
     lr=2e-3
     weight_decay=5e-07
     batch_size=80000
-    epoch_length=5000
-    f=camel
-    logdir='logs/sacred/mfruns1'
+    epoch_length=2000
+    f=create_fun(1,0.22)
+    logdir=LOGDIR
     q=m.Queue()
     dev=0
     gn=1
@@ -61,7 +89,7 @@ def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, bat
 
     NF._train_variance_forward_seq(f,optim,logdir,batch_size,epoch_length,0,True, False,True,_run,dev)
     
-    w = torch.empty(40000, NF.n_flow)
+    w = torch.empty(batch_size, NF.n_flow)
     torch.nn.init.uniform_(w).to(dev)
     XJ = NF.best_model(NF.format_input(w,dev))
     X = (XJ[:, :-1])
@@ -89,7 +117,7 @@ def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, bat
             _run.log_scalar("training.b_DKL", (NF.DKL).tolist(), 0)
             
     
-    q.put((NF.best_loss.tolist(), _run._id,NF.best_loss_rel.tolist(),NF.best_func_count, NF.varJ.tolist(),
+    q.put((loss.tolist(), _run._id,loss_rel.tolist(),NF.best_func_count, NF.varJ.tolist(),
            NF.DKL.tolist(),NF.best_var, NF.best_epoch,"NIS",NF.best_time,internal_id))
     pass
 """

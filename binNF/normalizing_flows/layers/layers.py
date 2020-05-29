@@ -28,7 +28,7 @@ class MaskLayer(torch.nn.Module):
        
 
     def forward(self, tensor):
-      
+     
         return torch.cat((torch.index_select(tensor, -1, self.feeder.view(-1)),
                           torch.index_select(tensor, -1, self.trafoer.view(-1)),
                           tensor[:,-1:]),-1)
@@ -43,11 +43,14 @@ class DeMaskLayer(torch.nn.Module):
         
 
     def forward(self, tensor):
-        
+     
         t=torch.ones_like(tensor[:,:-1],dtype=torch.int16)
         lister=self.list_ind*t
+        ret=torch.empty_like(tensor[:,:-1])
         
-        return torch.cat((torch.gather(tensor[:,:-1], -1,lister),tensor[:,-1:]),-1)
+        ret[:,torch.squeeze(self.list_ind,0)]=tensor[:,:-1]
+        
+        return torch.cat((ret,tensor[:,-1:]),-1)
 
 
 
