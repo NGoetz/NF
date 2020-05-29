@@ -189,7 +189,7 @@ class BasicManager(ModelAPI):
            
             
             self.int_loss=self.best_loss
-            self.best_var=(torch.var((f(X)*J)**2)/mini_batch_size).detach()
+            self.best_var=float((torch.var((f(X)*J)**2)/mini_batch_size).detach())
             #print(self.best_var)
             self.best_epoch=0
             self.best_time=0
@@ -307,9 +307,9 @@ class BasicManager(ModelAPI):
                 elif counter>5:
                     break
             last_loss=loss
-            if i%75==0 and i>100 and self.best_loss/stale_save>(1-1e-3) and not preburner:
+            if i%50==0 and i>51 and float(self.best_loss/stale_save)>(1-1e-3) and not preburner:
                 break
-            else:
+            elif i%50==0:
                 stale_save=self.best_loss 
             if _run!=None and self.best_time>1800:
                 break
