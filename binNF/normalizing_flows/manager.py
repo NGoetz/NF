@@ -151,55 +151,69 @@ class BasicManager(ModelAPI):
         if logging:
             history = {}
         """
-        w = torch.empty(mini_batch_size, self.n_flow)
+        i=0
+        self.model.to(dev)
+        self.best_loss=0
+        self.best_var=0
+        while (i<self.n_flow):
+            w = torch.empty(2*mini_batch_size, self.n_flow)
        # 
         
-        torch.nn.init.uniform_(w).to(dev)  # Generate a batch of points in latent space
+            torch.nn.init.uniform_(w).to(dev)  # Generate a batch of points in latent space
        
        # Y=torch.tan((w-0.5)*(np.pi))
        # """
         # Run the model once
         #torch.nn.init.normal_(w, std=10)
-        self.model.to(dev)
-        dkl=torch.nn.KLDivLoss(reduction='batchmean')
+        
+            dkl=torch.nn.KLDivLoss(reduction='batchmean')
        
-        XJ = self.model(  # Pass through the model
-            self.format_input(  # Append a unit Jacobian to each point
-                w,dev
-            )
-          )
+            
+            self.best_loss+=torch.mean((f(w))**2).detach()
+            i=i+1
+            
+            self.best_var+=float((torch.var((f(w))**2)/2*mini_batch_size).detach())
         
         if save_best:
-            X=XJ[:,:-1]
+            
             
             #fz=f(X)
+               
+            XJ = self.model(  # Pass through the model
+                self.format_input(  # Append a unit Jacobian to each point
+                    w,dev
+                )
+              )
+            X=XJ[:,:-1]
             J = XJ[:,-1]
-            self.varJ=torch.mean(J**2)
+            self.varJ=torch.mean(J**2).detach()
             #print(torch.var(w))
             #print(self.varJ)
             #print(torch.mean(J**2))
             #print(X)
             #print(torch.log(X))
-            self.DKL=dkl(torch.log(X+torch.ones_like(X).fill_(1e-45)).to(dev),w.to(dev))
+            self.DKL=dkl(torch.log(X+torch.ones_like(X).fill_(1e-45)).to(dev),w.to(dev)).detach()
             #print(self.DKL)
-            self.best_loss=torch.mean((f(w))**2)
+            self.best_loss=self.best_loss/self.n_flow
+            #print(self.best_loss)
+            
             #print("Int")
             #print(self.best_loss)
-            self.best_model=self.model
+            self.best_model=copy.deepcopy(self.model)
            
             
             self.int_loss=self.best_loss
-            self.best_var=float((torch.var((f(X)*J)**2)/mini_batch_size).detach())
             #print(self.best_var)
             self.best_epoch=0
             self.best_time=0
             self.best_loss_rel=torch.ones_like(self.best_loss)
             self.func_count=1
             self.best_func_count=1
+            del XJ,X,J
         if(_run!=None):
             _run.log_scalar("training.int_loss", self.best_loss.tolist(), 0)
 
-           
+       
            
     
         #torch.initial_seed()
@@ -259,6 +273,7 @@ class BasicManager(ModelAPI):
             
                 
             
+            
             loss.backward()
             
             optimizer_object.step()
@@ -290,7 +305,7 @@ class BasicManager(ModelAPI):
                 self.best_model=copy.deepcopy(self.model)
                 self.best_epoch=i
                 self.best_func_count=self.func_count*mini_batch_size
-               
+                
                 if(_run!=None):
                     self.best_time=(datetime.datetime.utcnow()-_run.start_time).total_seconds()
                 else:
@@ -307,16 +322,15 @@ class BasicManager(ModelAPI):
                 elif counter>5:
                     break
             last_loss=loss
-            if i%50==0 and i>51 and float(self.best_loss/stale_save)>(1-1e-3) and not preburner:
+            if i%25==0 and i>26 and float(self.best_loss/stale_save)>(1-1e-5) and not preburner:
                 break
-            elif i%50==0:
+            elif i%25==0:
                 stale_save=self.best_loss 
             if _run!=None and self.best_time>1800:
                 break
            
         
-            if preburner and (loss<0.2*self.best_loss or i>75):
-                
+            if preburner and (loss<0.15*self.best_loss):
                 preburner=False
             
             #if save_best and (loss > 1.75*self.best_loss*self.n_flow/2 or i-self.best_epoch>150) and i>pre_i+5:
@@ -330,14 +344,7 @@ class BasicManager(ModelAPI):
         if logging:
             self.history=history
         """
-        if(_run!=None):
-            _run.log_scalar("training.best_loss", self.best_loss.tolist(), 0)
-            _run.log_scalar("training.best_loss_rel", (self.best_loss_rel).tolist(), 0)
-           
-            _run.log_scalar("training.best_epoch", self.best_epoch, 0)
-        
-            _run.log_scalar("training.best_time", self.best_time, 0)
-            _run.log_scalar("training.best_func_count", self.best_func_count, 0)
+
         try:
             torch.save({
                 'best_epoch': self.best_epoch,

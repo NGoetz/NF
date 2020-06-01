@@ -8,6 +8,7 @@ import numpy as np
 from sacred import Experiment
 from sacred.observers import FileStorageObserver
 from multiprocessing import Process,Queue,Manager
+import datetime
 ex = Experiment()
 LOGDIR='logs/sacred/mfruns1'
 
@@ -50,7 +51,7 @@ def cfg():
 
 @ex.capture
 def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, batch_size, epoch_length, f, logdir,q,dev, internal_id):
-    
+    start_time=datetime.datetime.utcnow()
     
     # We define our NormalizingFlow object 
     NF =  PWQuadManager(n_flow=n_flow)
@@ -60,14 +61,8 @@ def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, bat
     optim = torch.optim.Adamax(NF._model.parameters(),lr=lr, weight_decay=weight_decay) 
 
     NF._train_variance_forward_seq(f,optim,logdir,batch_size,epoch_length,0,True, False,True,_run,dev)
+    end_time=datetime.datetime.utcnow()
     
-    w = torch.empty(40000, NF.n_flow)
-    torch.nn.init.uniform_(w).to(dev)
-    XJ = NF.best_model(NF.format_input(w,dev))
-    X = (XJ[:, :-1])
-    fXJ = torch.mul(f(X), XJ[:, -1])
-    loss = torch.mean(fXJ**2)
-    loss_rel=loss/NF.int_loss
     print('Initial loss')
     print(NF.int_loss)
     print('Epoch of best result')
@@ -76,21 +71,21 @@ def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, bat
     print(NF.best_loss)
     print('Best loss relative')
     print(NF.best_loss_rel)
-    print('Validation loss')
-    print(loss)
-    print('Validation loss relative')
-    print(loss_rel)
+    
     
     if(_run!=None):
-            _run.log_scalar("training.a_val_loss", loss.tolist(), 0)
-            _run.log_scalar("training.a_val_loss_rel", (loss_rel).tolist(), 0)
-            _run.log_scalar("training.a_val_loss_var", NF.best_var,0)
+            _run.log_scalar("training.best_loss", NF.best_loss.tolist(), 0)
+            _run.log_scalar("training.best_loss_rel", (NF.best_loss_rel).tolist(), 0)
+            _run.log_scalar("training.best_loss_var", NF.best_var,0)
+            _run.log_scalar("training.best_epoch", NF.best_epoch, 0)
+            _run.log_scalar("training.time", (end_time-start_time).total_seconds(), 0)
+            _run.log_scalar("training.best_func_count", NF.best_func_count, 0)
             _run.log_scalar("training.b_varJ", (NF.varJ).tolist(), 0)
             _run.log_scalar("training.b_DKL", (NF.DKL).tolist(), 0)
             
     
     q.put((NF.best_loss.tolist(), _run._id,NF.best_loss_rel.tolist(),NF.best_func_count, NF.varJ.tolist(),
-           NF.DKL.tolist(),NF.best_var, NF.best_epoch,"NIS",NF.best_time,internal_id))
+           NF.DKL.tolist(),NF.best_var, NF.best_epoch,"NIS",(end_time-start_time).total_seconds(),internal_id))
     pass
 """
     w = torch.empty((12100,2)) 
