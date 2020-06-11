@@ -1,2 +1,9 @@
 #hide logs
 **/logs
+*.pyc
+*.pyo
+**/__pycache__/
+*.cpython-37.pyc
+__pycache__/
+*.py[cod]
+__pycache__

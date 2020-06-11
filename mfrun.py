@@ -97,12 +97,12 @@ def create_funv(gn, gw):
 if __name__ == '__main__':
   
     gpus=4
-    hypopt_n=75
-    hypopt=False
-    n_bins_r=(4,13)
-    lr_r=(1e-5,2e-2)
-    weight_decay_r=(1e-7,1e-4)
-    batch_size_r=(60000,90000)#20000,90000
+    hypopt_n=40
+    hypopt=True
+    n_bins_r=(4,16) #minimum 4 to display 4 peaks, maximum 16 (so far rarely exceeded 10
+    lr_r=(5e-5,2e-2) #usual range 1e-4 to 1e-2
+    weight_decay_r=(1e-6,5e-4) #usually around 1e-5 to 1e-4 
+    batch_size_r=(20000,99999)#20000,90000 -> basically 20,40,60 and 80000
     repeat=1
     
     best_loss_rel=1000
@@ -111,19 +111,23 @@ if __name__ == '__main__':
     exdict={}
     exdictv={}
     i=0
-    logdir='logs/sacred/mfrun10'
-    for nnl in my_range(5,5,5): #4,10,1
-        for nnw in my_range(15,15,4): #7,20,2  #15
-            for dim in exp_range(2,2,2): #exp(2,32,2)
-                for cc in my_range(int(2*np.ceil(np.log2(dim))), int(2*np.ceil(np.log2(dim))),1): 
-                    #int(np.ceil(2*np.log2(dim))), dim,1, 
-                        for gn in exp_range(2,2,2): #exp 1,8,2 limit by dim!
-                            for gw in my_range(0.25,0.25,0.04): #0.1,0.3,0.05 #>0.15
+    logdir='logs/sacred/mfrun_full'
+    for nnl in my_range(3,13,5): #4,10,1  #minimum one hidden layer required to recognise complex structures. 15 cutoff for instabilities
+        for nnw in my_range(6,16,5): #7,20,2  #same as before
+            for dim in exp_range(2,32,2): #exp(2,32,2)
+                for cc in my_range(int(2*np.ceil(np.log2(dim))), int(4*np.ceil(np.log2(dim))),int(2*np.ceil(np.log2(dim)))): #transform every dim 2 times
+                     
+                        for gn in exp_range(1,min(8,dim*2),2): #exp 1,8,2 #8 peaks not possible for dim2
+                            #if(dim==2):
+                               # print(cc)
+                                #print(gn)
+                                #print('###')
+                            for gw in my_range(0.15,0.35,0.1): #peak should collapse at the boundaries of the range
                                 f=create_fun(gn,gw)
                                 
                                 fv=create_funv(gn,gw)
                                 exdict[str(i)]={"n_flow":dim,"NN_length":nnl, "NN_width": nnw, "n_cells":cc,
-                                                "f": f, "logdir":logdir, "gn": gn, "gw": gw}
+                                                "f": f, "logdir":logdir, "gn": gn, "gw": gw, "log": False}
                                 exdictv[str(i)]={"n_flow":dim,"f": fv, "logdir":logdir,"gn": gn, "gw": gw}
                                 i=i+1
                                 
@@ -147,6 +151,8 @@ if __name__ == '__main__':
         ex_init(logdir+"/hypopt") 
         time_total={}
         hyp_res={}
+        m=Manager()
+        q=m.Queue()
         for i in range(ex_n):
             start_time=datetime.datetime.utcnow()
             processes = []
@@ -155,33 +161,42 @@ if __name__ == '__main__':
             hypdict={}
             best_loss_rel=1000
             best_id=0
-
+            
             while j<int(hypopt_n-hypopt_n%gpus):
-                m=Manager()
-                q=m.Queue()
-                for n in range(gpus):
-                    hyp_cfg=cfgdict[str(i)+";"+str(j)]
-                    j=j+1
+                try: 
+                    for n in range(gpus):
+                        hyp_cfg=cfgdict[str(i)+";"+str(j)]
+                        j=j+1
 
-                    hyp_cfg['dev']=n
-                    hyp_cfg['q']=q
-                    z = ex_cfg.copy()
-                    z.update(hyp_cfg)
-                    config_updates={}
-                    config_updates['config_updates']=z
-                    p = Process(target=ex.run, kwargs=config_updates)
-                    p.start()
-                    processes.append(p)
-                for p in processes:
-                    p.join()
-                    while not q.empty():
-                        res=q.get()
-                        hyp_res[str(res[1])]={'best_loss':res[0],'best_loss_rel':res[2],'best_count':res[3], 'loss_var': res[6], 
-                                          'best_epoch': res[7], 'dim': z['n_flow'], "gn": z['gn'],
-                                          "gw": z['gw'],"nnl": z['NN_length'], "nnw":z['NN_width'], "time":res[9] }
-                        if(res[2]<best_loss_rel):  
-                            best_loss_rel=res[2]
-                            best_id=res[10]
+                        hyp_cfg['dev']=n
+                        hyp_cfg['q']=q
+                        hyp_cfg['log']=False
+                        z = ex_cfg.copy()
+                        z.update(hyp_cfg)
+                        config_updates={}
+                        config_updates['config_updates']=z
+                        p = Process(target=ex.run, kwargs=config_updates)
+                        p.start()
+                        processes.append(p)
+
+                    for p in processes:
+
+                        p.join()
+                        while not q.empty():
+                            res=q.get()
+                            hyp_res[str(res[1])]={'best_loss':res[0],'best_loss_rel':res[2],'best_count':res[3],
+                                                  'loss_var': res[6], 
+                                              'best_epoch': res[7], 'dim': z['n_flow'], "gn": z['gn'],
+                                              "gw": z['gw'],"nnl": z['NN_length'], "nnw":z['NN_width'], "time":res[9] }
+                            if(res[2]<best_loss_rel):  
+                                best_loss_rel=res[2]
+                                best_id=res[10]
+                except Exception as e:
+                    print("Exception in process occured")
+                    print(e)
+                    for p in processes:
+                        p.kill()
+                    
 
             exdict[str(i)].update(cfgdict[str(i)+";"+str(best_id)])
             time_total[str(i)]=(datetime.datetime.utcnow()-start_time).total_seconds()
@@ -214,47 +229,60 @@ if __name__ == '__main__':
     file.write('ID, number of peaks, width of peaks, NN_length, NN_width,dimensions, modus, best_loss, best_loss_rel,'+
            'var_loss, best_epoch, best_count, time, time_total\n')
     file.close()
+    m=Manager()
+    q=m.Queue()
     for z in range(repeat):
         for i in range(ex_n):
-            resdict={}
-            processes = []
-            m=Manager()
-            q=m.Queue()
-            if(len(exdict)==0 or len(exdictv)==0):
-                    break
-            run_cfg=exdict[str(i)]
-            run_cfgv=exdictv[str(i)]
-            for n in range(gpus+1):
-                n=n-1
-                run_cfg['q']=q
-                run_cfg['dev']=n
-                run_cfg['logdir']=logdir+"/NIS"
-                run_cfgv['q']=q
-                config_updates={}
-                config_updatesv={}
-                config_updates['config_updates']=run_cfg
-                config_updatesv['config_updates']=run_cfgv
-                if n>=0:
-                    p = Process(target=ex.run, kwargs=config_updates)
-                else:
-                    p=Process(target=exv.run, kwargs=config_updatesv) 
-                p.start()
-                processes.append(p)
+            try:
+                resdict={}
+                processes = []
+
+                if(len(exdict)==0 or len(exdictv)==0):
+                        break
+                run_cfg=exdict[str(i)]
+                run_cfgv=exdictv[str(i)]
+                for n in range(gpus+1):
+                    n=n-1
+                    run_cfg['q']=q
+                    run_cfg['dev']=n
+                    run_cfg['logdir']=logdir+"/NIS"
+                    run_cfg['log']=True
+                    run_cfgv['q']=q
+                    run_cfgv['log']=True
+                    config_updates={}
+                    config_updatesv={}
+                    config_updates['config_updates']=run_cfg
+                    config_updatesv['config_updates']=run_cfgv
+                    if n>=0:
+                        p = Process(target=ex.run, kwargs=config_updates)
+                    else:
+                        p=Process(target=exv.run, kwargs=config_updatesv) 
+                    p.start()
+                    processes.append(p)
+            except Exception as e:
+                print("Exception in process start")
+                print(e)
             for p in processes:
                 p.join()
                 while not q.empty():
-                    res=q.get()
-                    if(res[8]=='NIS'):
-                        resdict[str(res[1])]={'best_loss':res[0],'best_loss_rel':res[2],'best_count':res[3], 'loss_var': res[6], 
-                                          'best_epoch': res[7], 'dim': run_cfg['n_flow'], "gn": run_cfg['gn'],
-                                          "gw": run_cfg['gw'], "modus": res[8], "time":res[9], "nnl": run_cfg['NN_length'],
-                                          "nnw": run_cfg['NN_width'] }
-                    else:
-                        resdict[str(res[1])+'V']={'best_loss':res[0],'best_loss_rel':res[2],
-                                                  'best_count':res[3], 'loss_var': res[6], 
-                                          'best_epoch': res[7], 'dim': run_cfg['n_flow'], "gn": run_cfg['gn'],
-                                          "gw": run_cfg['gw'], "modus": res[8], "time":res[9], "nnl": run_cfg['NN_length'],
-                                          "nnw": run_cfg['NN_width'] }
+                    try:
+                        res=q.get()
+                        if(res[8]=='NIS'):
+                            resdict[str(res[1])]={'best_loss':res[0],'best_loss_rel':res[2],'best_count':res[3],
+                                                  'loss_var': res[6], 
+                                              'best_epoch': res[7], 'dim': run_cfg['n_flow'], "gn": run_cfg['gn'],
+                                              "gw": run_cfg['gw'], "modus": res[8], "time":res[9], "nnl": run_cfg['NN_length'],
+                                              "nnw": run_cfg['NN_width'] }
+                        else:
+                            resdict[str(res[1])+'V']={'best_loss':res[0],'best_loss_rel':res[2],
+                                                      'best_count':res[3], 'loss_var': res[6], 
+                                              'best_epoch': res[7], 'dim': run_cfg['n_flow'], "gn": run_cfg['gn'],
+                                              "gw": run_cfg['gw'], "modus": res[8], "time":res[9], "nnl": run_cfg['NN_length'],
+                                              "nnw": run_cfg['NN_width'] }
+                    except Exception as e:
+                        print("Exception in process reading")
+                        print(e)
+                        
 
 
             for (key,value) in resdict.items():

@@ -44,13 +44,14 @@ def cfg():
     gn=1
     gw=1
     internal_id=0
+    log=True
 
     
     
 
 
 @ex.capture
-def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, batch_size, epoch_length, f, logdir,q,dev, internal_id):
+def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, batch_size, epoch_length, f, logdir,q,dev, internal_id, log):
     start_time=datetime.datetime.utcnow()
     
     # We define our NormalizingFlow object 
@@ -60,7 +61,7 @@ def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, bat
 
     optim = torch.optim.Adamax(NF._model.parameters(),lr=lr, weight_decay=weight_decay) 
 
-    NF._train_variance_forward_seq(f,optim,logdir,batch_size,epoch_length,0,True, False,True,_run,dev)
+    NF._train_variance_forward_seq(f,optim,logdir,batch_size,epoch_length,0,True, False,True,_run,dev,log)
     end_time=datetime.datetime.utcnow()
     
     print('Initial loss')

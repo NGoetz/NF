@@ -39,7 +39,7 @@ def cfg():
     ngrid=40
     gn=1
     gw=1
-    
+    log=True
     
 
 

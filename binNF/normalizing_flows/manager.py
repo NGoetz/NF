@@ -81,7 +81,8 @@ class BasicManager(ModelAPI):
 
     
     def _train_variance_forward_seq(self, f, optimizer_object, logdir, batch_size = 10000, epochs=10, epoch_start=0,
-                                logging=True, pretty_progressbar=True,  save_best=True, _run=None,n=0,mini_batch_size=20000,
+                                logging=True, pretty_progressbar=True,  
+                                    save_best=True, _run=None,n=0,log=True,mini_batch_size=20000,
                                 **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
@@ -107,7 +108,7 @@ class BasicManager(ModelAPI):
         assert mini_batch_size<=batch_size, "The minibatch size must be smaller than the batch size"
         n_minibatches = int(batch_size/mini_batch_size)
         
-        if(_run!=None): 
+        if(_run!=None and log): 
             filename=logdir+"/"+str(_run._id)+"/torch"
             filename2=filename+"_int"
             if not os.path.exists(logdir+"/"+str(_run._id)):
@@ -120,14 +121,15 @@ class BasicManager(ModelAPI):
                 os.mkdir(logdir)
    
         try:
-            file= open(filename,"w+")
-            file2=open(filename2,"w+")
-            file2.close()
-            file.close()
-            torch.save({
-                'model_state_dict': self.best_model.state_dict()
-                },filename2)
-            
+            if(log):
+                file= open(filename,"w+")
+                file2=open(filename2,"w+")
+                file2.close()
+                file.close()
+                torch.save({
+                    'model_state_dict': self.best_model.state_dict()
+                    },filename2)
+
         except:
             print("Torch save not possible")
          
@@ -210,7 +212,7 @@ class BasicManager(ModelAPI):
             self.func_count=1
             self.best_func_count=1
             del XJ,X,J
-        if(_run!=None):
+        if(_run!=None and log):
             _run.log_scalar("training.int_loss", self.best_loss.tolist(), 0)
 
        
@@ -282,7 +284,7 @@ class BasicManager(ModelAPI):
             # Update the progress bar
             if pretty_progressbar:
                 epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
-            if(_run!=None):       
+            if(_run!=None and log):       
                 _run.log_scalar("training.loss", loss.tolist(), i)
                 _run.log_scalar("training.loss_rel",(loss/self.int_loss).tolist(),i)
                
@@ -297,14 +299,14 @@ class BasicManager(ModelAPI):
             writer.add_scalar('loss', float(loss),i)
             writer.add_scalar('std', float(std),i)
             """
-            
+            self.best_func_count=self.func_count*mini_batch_size
             if save_best and (loss < self.best_loss) and not preburner:
                 self.best_loss = loss
                 self.best_var=var
                 self.best_loss_rel=loss/self.int_loss
                 self.best_model=copy.deepcopy(self.model)
                 self.best_epoch=i
-                self.best_func_count=self.func_count*mini_batch_size
+                
                 
                 if(_run!=None):
                     self.best_time=(datetime.datetime.utcnow()-_run.start_time).total_seconds()
@@ -322,15 +324,15 @@ class BasicManager(ModelAPI):
                 elif counter>5:
                     break
             last_loss=loss
-            if i%25==0 and i>26 and float(self.best_loss/stale_save)>(1-1e-5) and not preburner:
+            if i%25==0 and i>26 and float(self.best_loss/stale_save)>(1-1e-4) and not preburner:
                 break
             elif i%25==0:
                 stale_save=self.best_loss 
-            if _run!=None and self.best_time>1800:
+            if _run!=None and self.best_time>300:
                 break
            
         
-            if preburner and (loss<0.15*self.best_loss):
+            if preburner and ((loss<0.15*self.best_loss) or i>100):
                 preburner=False
             
             #if save_best and (loss > 1.75*self.best_loss*self.n_flow/2 or i-self.best_epoch>150) and i>pre_i+5:
@@ -346,14 +348,15 @@ class BasicManager(ModelAPI):
         """
 
         try:
-            torch.save({
-                'best_epoch': self.best_epoch,
-                'best_loss': self.best_loss,
-                'int_loss': self.int_loss,
-                'best_loss_rel' : self.best_loss_rel,
-                'best_func_count' : self.best_func_count,
-                'model_state_dict': self.best_model.state_dict()
-                },filename)
+            if (log):
+                torch.save({
+                    'best_epoch': self.best_epoch,
+                    'best_loss': self.best_loss,
+                    'int_loss': self.int_loss,
+                    'best_loss_rel' : self.best_loss_rel,
+                    'best_func_count' : self.best_func_count,
+                    'model_state_dict': self.best_model.state_dict()
+                    },filename)
         except:
             print("Torch save not possible")
 
