@@ -180,18 +180,18 @@ class PWQuad(torch.nn.Module):
         
         Vnorms_tot=Vnorms[:, :, -1].clone() 
         V=torch.div(V,torch.unsqueeze(Vnorms_tot,axis=-1)) 
-        Wsum2=torch.cat((torch.zeros([Wsum.shape[0],Wsum.shape[1],1]).to(dev),Wsum),axis=-1)
+        Wsum2=torch.cat((torch.zeros([Wsum.shape[0],Wsum.shape[1],1]).to(dev).to(torch.double),Wsum),axis=-1)
         finder=torch.where(Wsum>torch.unsqueeze(xB,axis=-1),torch.zeros_like(Wsum),torch.ones_like(Wsum))
         
         div_ind=torch.unsqueeze(torch.argmax(torch.cat((torch.empty(Wsum.shape[0],Wsum.shape[1],1)
-                                                        .fill_(1e-30).to(dev),finder*Wsum),axis=-1),axis=-1),-1)
+                                                        .fill_(1e-30).to(dev).to(torch.double),finder*Wsum),axis=-1),axis=-1),-1)
         
 
         
         alphas=torch.div((xB-torch.squeeze(torch.gather(Wsum2,-1,div_ind),axis=-1)),
                          torch.squeeze(torch.gather(W,-1,div_ind),axis=-1))
         
-        VW=torch.cat((torch.zeros([V.shape[0],V.shape[1],1]).to(dev),
+        VW=torch.cat((torch.zeros([V.shape[0],V.shape[1],1]).to(dev).to(torch.double),
                                   torch.cumsum(torch.mul((V[:,:,:-1]+V[:,:,1:])/2,W),axis=-1)),axis=-1)
         shift= torch.squeeze(torch.gather(VW,-1,div_ind),axis=-1)
         

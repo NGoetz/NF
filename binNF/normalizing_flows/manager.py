@@ -156,9 +156,12 @@ class BasicManager(ModelAPI):
         i=0
         self.model.to(dev)
         self.best_loss=0
+       
         self.best_var=0
+        maxf=0
+        #meanf=0
         while (i<self.n_flow):
-            w = torch.empty(2*mini_batch_size, self.n_flow)
+            w = torch.empty(2*mini_batch_size, self.n_flow).to(torch.double)
        # 
         
             torch.nn.init.uniform_(w).to(dev)  # Generate a batch of points in latent space
@@ -169,12 +172,20 @@ class BasicManager(ModelAPI):
         #torch.nn.init.normal_(w, std=10)
         
             dkl=torch.nn.KLDivLoss(reduction='batchmean')
-       
+            if torch.max(f(w))>maxf:
+                maxf=torch.max(f(w))
+            #meanf_add=torch.mean(f(w))/maxf
+            self.best_loss+=torch.var(f(w)/maxf).detach()
             
-            self.best_loss+=torch.mean((f(w))**2).detach()
             i=i+1
+            #meanf+=meanf_add
             
             self.best_var+=float((torch.var((f(w))**2)/2*mini_batch_size).detach())
+        #meanf=meanf/(self.n_flow)
+        
+        #def g(x):
+         #   return f(x)-meanf
+            
         
         if save_best:
             
@@ -194,10 +205,17 @@ class BasicManager(ModelAPI):
             #print(torch.mean(J**2))
             #print(X)
             #print(torch.log(X))
+            #print(w)
+            #print(X)
+            #self.DKL=dkl(torch.log(w).to(dev),X.to(dev)).detach()
+            #print(dkl(torch.log(w).to(dev),XJ[:,:-1].to(dev)))
+            #print(self.DKL)
             self.DKL=dkl(torch.log(X+torch.ones_like(X).fill_(1e-45)).to(dev),w.to(dev)).detach()
             #print(self.DKL)
+            #print(self.DKL)
             self.best_loss=self.best_loss/self.n_flow
-            #print(self.best_loss)
+            
+            
             
             #print("Int")
             #print(self.best_loss)
@@ -226,15 +244,18 @@ class BasicManager(ModelAPI):
         last_loss=1000
         for i in epoch_progress:
             loss = 0
+            loss2=0
+            loss3=0
             var = 0
             optimizer_object.zero_grad()
-            w = torch.empty(mini_batch_size, self.n_flow).to(dev)
+            
             for j in minibatch_progress:
                # if(i%3==0):
                 
 
                 #torch.nn.init.normal_(w, std=10)
                 #"""
+                w = torch.empty(mini_batch_size, self.n_flow).to(dev).to(torch.double)
                 torch.nn.init.uniform_(w)
                 #Y=150*torch.tan((w-0.5)*(np.pi))
                 #"""
@@ -260,13 +281,20 @@ class BasicManager(ModelAPI):
                 """
                 #fz=torch.div(f(X).detach(),normal(X,0,10,self.n_flow))
                 #if(i<30 and 2*j>i):
+               
                 if(preburner):
-                    fXJ=torch.mul(f(w), XJ[:, -1])
+                    fXJ=torch.mul(f(w), XJ[:, -1])/maxf
+                    
                 else:
-                    fXJ = torch.mul(f(X), XJ[:, -1])
+                    fXJ = torch.mul(f(X), XJ[:, -1])/maxf
+                    
+                
                 self.func_count=self.func_count+1
+                
+                loss+=torch.var(fXJ)
+                
                 # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
-                loss+= torch.mean(fXJ**2)
+                
                 var+=float(torch.var(fXJ**2)/mini_batch_size) # variance of the mean is variance/N
                 del X, fXJ, XJ
                 
@@ -324,17 +352,21 @@ class BasicManager(ModelAPI):
                 elif counter>5:
                     break
             last_loss=loss
-            if i%25==0 and i>26 and float(self.best_loss/stale_save)>(1-1e-4) and not preburner:
+            if i%50==0 and i>51 and float(self.best_loss/stale_save)>(1-1e-4) and not preburner:
                 break
-            elif i%25==0:
+            elif i%50==0 and not preburner and (self.best_loss<self.int_loss or i>300):
+                print(self.best_loss)
+                print(stale_save)
                 stale_save=self.best_loss 
             if _run!=None and self.best_time>300:
                 break
            
         
             if preburner and ((loss<0.15*self.best_loss) or i>100):
+                print("preburner finished")
+                print(i)
                 preburner=False
-            
+            """"""
             #if save_best and (loss > 1.75*self.best_loss*self.n_flow/2 or i-self.best_epoch>150) and i>pre_i+5:
             #    break   
            
@@ -693,7 +725,7 @@ class PWLinManager(BasicManager):
         self._model.to(dev)
         self.best_model=self.model
        
-        w = torch.empty(5, self.n_flow)
+        w = torch.empty(5, self.n_flow).to(torch.double)
         torch.nn.init.uniform_(w).to(dev)
         # Do one pass forward:
         self._model(self.format_input(w,dev))   
@@ -793,10 +825,10 @@ class PWQuadManager(BasicManager):
                     
             
             
-        self._model.to(dev)
+        self._model.to(dev).to(torch.double)
         self.best_model=self.model
        
-        w = torch.empty(5, self.n_flow)
+        w = torch.empty(5, self.n_flow).to(torch.double)
         #print(w.shape)
         torch.nn.init.uniform_(w).to(dev)
         ####

@@ -20,6 +20,11 @@ LOGDIR='logs/sacred/mfruns1'
 
 def camel(x):
     return torch.exp( -((x[:,0]-0.75)**2+(x[:,1]-0.75)**2)/(0.2**2))+torch.exp( -((x[:,0]-0.25)**2+(x[:,1]-0.25)**2)/(0.2**2))
+def csq(x):
+    ret=torch.cos(x[:,0])**2
+    
+    return ret
+
 
 def ex_init(logdir):
     LOGDIR=logdir
@@ -37,7 +42,7 @@ def cfg():
     weight_decay=5e-07
     batch_size=80000
     epoch_length=5000
-    f=camel
+    f=csq
     logdir='logs/sacred/mfruns1'
     q=m.Queue()
     dev=0

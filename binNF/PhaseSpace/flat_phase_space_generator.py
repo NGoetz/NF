@@ -17,33 +17,48 @@ def set_square_t(inputt, square, negative=False):
         If negative is True, set the time component to be negative,
         else assume it is positive.
         """
+        #print(inputt)
+        #print(square)
         ret=torch.zeros_like(inputt)
-        ret[0] = (rho2_t(inputt) + square) ** 0.5
-        if negative: ret[0] *= -1
-        ret[1:]=inputt[1:]
+        #print(rho2_t(inputt).shape)
+        #print(square.shape)
+        ret[:,0] = (rho2_t(inputt) + square) ** 0.5
+        #print("rho2")
+        #print(rho2_t(inputt))
+        #print((rho2_t(inputt) + square) ** 0.5)
+        if negative: ret[:,0] *= -1
+        ret[:,1:]=inputt[:,1:]
+        #print(ret)
         return ret
     
 def rho2_t(inputt):
         """Compute the radius squared."""
-
-        return torch.sum(inputt[1:]**2,-1)
+        #print(inputt[:,1:])
+        return torch.sum(inputt[:,1:]*inputt[:,1:],-1)
     
 def boostVector_t(inputt):
-
-        if inputt[0] <= 0. or square_t(inputt) < 0.:
+        #print("boostVector")
+        #print(inputt)
+        if torch.min(inputt[:,0]) <= 0. or torch.min(square_t(inputt)) < 0.:
             logger.critical("Attempting to compute a boost vector from")
             logger.critical("%s (%.9e)" % (str(self), self.square()))
             raise InvalidOperation
-        return inputt[1:]/inputt[0]
+        #print(inputt[:,1:].shape)
+        #print(inputt[:,0].unsqueeze(1).shape)
+        #print(inputt[:,1:]/inputt[:,0].unsqueeze(1))
+        #print("Ende bV")
+        return inputt[:,1:]/inputt[:,0].unsqueeze(1)
     
 def square_t(inputt):
-    if(inputt.shape[0]==4):
+    if(inputt.shape[1]==4 or inputt.shape[0]==4):
+        #print("A")
         return dot_t(inputt,inputt)
     else:
-        return torch.dot(inputt,inputt)
+        #print("B")
+        return torch.sum(inputt*inputt,-1)
     
 def dot_t(inputa,inputb):
-    return inputa[0]*inputb[0] - inputa[1]*inputb[1] - inputa[2]*inputb[2] - inputa[3]*inputb[3]
+    return inputa[:,0]*inputb[:,0] - inputa[:,1]*inputb[:,1] - inputa[:,2]*inputb[:,2] - inputa[:,3]*inputb[:,3]
     
 def boost_t(inputt, boost_vector, gamma=-1.):
         """Transport self into the rest frame of the boost_vector in argument.
@@ -51,17 +66,33 @@ def boost_t(inputt, boost_vector, gamma=-1.):
             p.boost(-p.boostVector())
         transforms p to (M,0,0,0).
         """
-        
+        """
+        print("---")
+        print(inputt)
+        print(boost_vector)
+        print("-----")
+        """
         b2 = square_t(boost_vector)
         if gamma < 0.:
             gamma = 1.0 / torch.sqrt(1.0 - b2)
-        inputt_space = inputt[1:]
-        bp = torch.dot(inputt_space,boost_vector)
-        gamma2 = (gamma-1.0) / b2 if b2 > 0 else 0.
-        factor = gamma2*bp + gamma*inputt[0]
-       
-        inputt_space+= factor*boost_vector
-        inputt[0] = gamma*(inputt[0] + bp)
+        inputt_space = inputt[:,1:]
+        #print(inputt.shape)
+        #print(inputt_space.shape)
+        #print(boost_vector.shape)
+        bp = torch.sum(inputt_space*boost_vector,-1)
+        
+        gamma2=torch.where(b2>0, (gamma-1.0)/b2,torch.zeros_like(b2))
+        #gamma2 = (gamma-1.0) / b2 if b2 > 0 else 0.
+        factor = gamma2*bp + gamma*inputt[:,0]
+        #print(inputt_space.shape)
+        #print(factor.shape)
+        #print(boost_vector.shape)
+        #print(gamma2)
+        inputt_space+= factor.unsqueeze(1)*boost_vector
+        #inputt[:,1:]=inputt_space[:,:]
+        inputt[:,0] = gamma*(inputt[:,0] + bp)
+        #print(inputt)
+        #print(inputt)
         return inputt
     
 def cosTheta_t(inputt):
@@ -227,14 +258,14 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
     def __init__(self, *args, **opts):
         super(FlatInvertiblePhasespace, self).__init__(*args, **opts)
         if self.n_initial == 1:
-            raise InvalidCmd("This basic generator does not support decay topologies.")
+            raise PhaseSpaceGeneratorError("This basic generator does not support decay topologies.")
 
     def get_dimensions(self):
         """ Make sure the collider setup is supported."""
 
         
         if self.beam_Es[0]!=self.beam_Es[1]:
-            raise InvalidCmd(
+            raise PhaseSpaceGeneratorError(
                 "This basic generator only supports colliders with incoming beams equally energetic.")
 
         return super(FlatInvertiblePhasespace,self).get_dimensions()
@@ -244,13 +275,14 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         """ Return the phase-space volume for a n massless final states.
         Vol(E_cm, n) = (pi/2)^(n-1) *  (E_cm^2)^(n-2) / ((n-1)!*(n-2)!)
         """
+        #ADAPTED IT TO THE MISSING FACTOR
         if n==1: 
             # The jacobian from \delta(s_hat - m_final**2) present in 2->1 convolution
             # must typically be accounted for in the MC integration framework since we
             # don't have access to that here, so we just return 1.
             return 1.
-
-        return math.pow((math.pi/2.0),n-1)*\
+        
+        return math.pow(2*math.pi, 4-3*n)*math.pow((math.pi/2.0),n-1)*\
             (math.pow((E_cm**2),n-2)/(math.factorial(n-1)*math.factorial(n-2)))
     
    
@@ -308,7 +340,7 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         """Generate the initial state momenta."""
 
         if self.n_initial not in [1,2]:
-            raise InvalidCmd(
+            raise PhaseSpaceGeneratorError(
                "This PS generator only supports 1 or 2 initial states")
 
         if self.n_initial == 1:
@@ -361,7 +393,7 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         mass = self.masses_t[0]
         if self.n_final == 1:
             if self.n_initial == 1:
-                raise InvalidCmd("1 > 1 phase-space generation not supported.")
+                raise PhaseSpaceGeneratorError("1 > 1 phase-space generation not supported.")
             if mass/E_cm < 1.e-7 or ((E_cm-mass)/mass) > 1.e-7:
                 raise PhaseSpaceGeneratorError("1 > 2 phase-space generation needs a final state mass equal to E_c.o.m.")
             output_momenta_t.append(torch.tensor([mass/2., 0., 0., mass/2.], dtype=torch.double, device=random_variables.device))
@@ -404,8 +436,8 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
                 output_momenta_t.append(torch.zeros_like(lv[:,0]))
                 continue
 
-            
-            p2 =(lv[:,i-self.n_initial])
+            Q_t=Q_t.unsqueeze(0)
+            p2 =(lv[:,i-self.n_initial]).unsqueeze(0)
             p2=set_square_t(p2,self.masses_t[i-self.n_initial]**2)
             
             
@@ -413,11 +445,11 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
            
             p2=set_square_t(p2,self.masses_t[i-self.n_initial]**2)
             
-            output_momenta_t.append(p2)
+            output_momenta_t.append(p2.squeeze(0))
             
             nextQ_t=Q_t-p2
             
-            nextQ_t=set_square_t(nextQ_t,M[i-self.n_initial+1]**2)
+            nextQ_t=set_square_t(nextQ_t,M[i-self.n_initial+1]**2).squeeze(0)
            
             Q_t = nextQ_t
         
@@ -451,9 +483,9 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
        
         
         M[0] -= torch.sum(self.masses_t)
-        
+        #print(random_variables)
         weight = self.generateIntermediatesMasslessVec(M, E_cm, random_variables)
-       
+        #print(M)
         K_t=M.clone()
         
         masses_sum=torch.flip(torch.cumsum(torch.flip(self.masses_t,(-1,)),-1),(-1,))
@@ -471,7 +503,7 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
                             self.rho(K_t[:self.n_final-2],K_t[1:],0.)) * (M[1:self.n_final-1]/K_t[1:self.n_final-1]),-1)
         
         weight *= torch.pow(K_t[0]/M[0],2*self.n_final-4)
-        
+        #print(random_variables)
         
         return weight
 
@@ -504,14 +536,14 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         for i in range(2,self.n_final):
             for k in range(i, self.n_final+1):
                 Q[i-1] = Q[i-1] + moms[k+self.n_initial-1]
-            M[i-1] = abs(square_t(Q[i-1]))**0.5
+            M[i-1] = abs(square_t(Q[i-1].unsqueeze(0)))**0.5
         
         weight = self.invertIntermediatesMassive_t(M, E_cm, random_variables)
         
         for i in range(self.n_initial,self.n_final+1):
             
-            boost_vec = -boostVector_t(Q[i-self.n_initial])
-            p=boost_t(moms[i],boost_vec)
+            boost_vec = -boostVector_t(Q[i-self.n_initial].unsqueeze(0))
+            p=boost_t(moms[i].unsqueeze(0),boost_vec).squeeze(0)
             random_variables[self.n_final-2+2*(i-self.n_initial)] = (cosTheta_t(p)+1.)/2.
             phi = phi_t(p)
             if (phi < 0.):
@@ -553,8 +585,279 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         
         return self.get_flatWeights(E_cm, self.n_final)
     
+    def generateKinematics_batch(self, E_cm, random_variables):
+        """Generate a self.n_initial -> self.n_final phase-space point
+        using the random variables passed in argument.
+        """
+        
+        
+        assert (random_variables.shape[1]==self.nDimPhaseSpace())
+        #random_variables=random_variables.repeat(2, 1)
+
+        # Make sure that none of the random_variables is NaN.
+        if torch.isnan(random_variables).any():
+            raise PhaseSpaceGeneratorError("Some of the random variables passed "+
+              "to the phase-space generator are NaN: %s"%str(random_variables.data.tolist()))
+        
+       
+        # The distribution weight of the generate PS point
+        weight = torch.ones(random_variables.shape[0],dtype=torch.double, device=random_variables.device)
+        #TRY TO VECTORISE TO GET IT GPU FRIENDLY
+        output_momenta_t=[]
+        #output_returner=torch.zeros_like(random_variables)
+        #weight_returner=[]
+        mass = self.masses_t[0]
+        if self.n_final == 1:
+            if self.n_initial == 1:
+                raise PhaseSpaceGeneratorError("1 > 1 phase-space generation not supported.")
+            if mass/E_cm < 1.e-7 or ((E_cm-mass)/mass) > 1.e-7:
+                raise PhaseSpaceGeneratorError("1 > 2 phase-space generation needs a final state mass equal to E_c.o.m.")
+            output_momenta_t.append([mass/2., 0., 0., mass/2.])
+            output_momenta_t.append([mass/2., 0., 0., -mass/2.])
+            output_momenta_t.append([mass   , 0., 0.,       0.])
+            weight = self.get_flatWeights(E_cm, 1)
+            output_returner=torch.tensor(output_momenta_t,dtype=torch.double, device=random_variables.device).unsqueeze(0).repeat(random_variables.shape[0],1) #need [batch, momenta, indices]
+            weight_returner=[weight]*random_variables.shape[0]
+            return output_returner, weight_returner
+        
+        M    = [ 0. ]*(self.n_final-1)
+        M[0] = E_cm
+        M=torch.tensor(M,requires_grad=False, dtype=torch.double, device=random_variables.device)
+        M=torch.unsqueeze(M,0).repeat(random_variables.shape[0],1)
+        
+        
+        
+        weight *= self.generateIntermediatesMassive_batch(M, E_cm, random_variables)
+        
+        
+        Q_t=torch.tensor([0., 0., 0., 0.],requires_grad=False, dtype=torch.double, device=random_variables.device)
+        Q_t=Q_t.unsqueeze(0).repeat(random_variables.shape[0],1)
+        Q_t[:,0]=M[:,0]
+        M=torch.cat((M,self.masses_t.unsqueeze(0).repeat(random_variables.shape[0],1)[:,-1:]),-1)
+        #print(M.shape)
+        q_t=(4.*M[:,:-1]*self.rho(M[:,:-1],M[:,1:],self.masses_t[:-1]))
+        #print(q_t.shape)
+        rnd=random_variables[:,self.n_final-2:3*self.n_final-4]
+        
+        cos_theta_t=(2.*rnd[:,0::2]-1.)
+        sin_theta_t=(torch.sqrt(1.-cos_theta_t**2))
+        phi_t=2*math.pi*rnd[:,1::2]
+        cos_phi_t=torch.cos(phi_t)
+        sqrt=torch.sqrt(1.-cos_phi_t**2)
+        sin_phi_t=(torch.where(phi_t>math.pi,-sqrt,sqrt))
+        a=torch.unsqueeze((q_t*sin_theta_t*cos_phi_t),0)
+        b=torch.unsqueeze((q_t*sin_theta_t*sin_phi_t),0)
+        c=torch.unsqueeze((q_t*cos_theta_t),0)
+       
+        lv=torch.cat((torch.zeros_like(a),a,b,c),0)
+        #print(lv.shape)
+        #print('####')
+        ###
+        output_returner=torch.zeros((random_variables.shape[0],self.n_initial+self.n_final,4),
+                                    dtype=torch.double,device=random_variables.device)
+        for i in range(self.n_initial+self.n_final-1):
+            
+            if i < self.n_initial:
+                
+                output_returner[:,i,:]=0
+                continue
+
+            #!!!!!!!!!!
+            #print(lv[:,:,i-self.n_initial].t().shape)
+            p2 =(lv[:,:,i-self.n_initial].t())
+            #print("---------------")
+            #print("p pre oldsquare")
+            #print(p2)
+            p2=set_square_t(p2,self.masses_t[i-self.n_initial]**2)
+            #print("p pre boost")
+            #print(p2)
+            #print(boostVector_t(Q_t))
+            #input of boostVector differs
+            p2=boost_t(p2,boostVector_t(Q_t)) #here is the issue 
+            #print(Q_t)
+            #print(p2)
+            #print("p pre square")
+            #print(p2)
+            p2=set_square_t(p2,self.masses_t[i-self.n_initial]**2)
+            #print("squarearg")
+            #print(self.masses_t[i-self.n_initial]**2)
+            #!!!!!!!!!!!!!!
+            #output_momenta_t.append(p2)
+            output_returner[:,i,:]=p2
+            """
+            print("---")
+            print("Q")
+            print(Q_t)
+            """
+            #print("p")
+            #print(p2)
+            #print("nextQ")
+            nextQ_t=Q_t-p2
+            #print(nextQ_t)
+            #print(M[:,i-self.n_initial+1]**2)
+            nextQ_t=set_square_t(nextQ_t,M[:,i-self.n_initial+1]**2)
+            #print(nextQ_t)
+            #print("----")
+            Q_t = nextQ_t
+        
+        #output_momenta_t.append(Q_t)
+        output_returner[:,-1,:]=Q_t
+        
+        self.setInitialStateMomenta_batch(output_returner,E_cm) #!!!!!!!
+        """
+        err=torch.abs(torch.sum(output_returner[:,2:,0],1)-torch.sum(output_returner[:,:2,0],1))
+        output_returner=output_returner.repeat(2,1,1)
+        weight=weight.repeat(2)
+        err=err.repeat(2)
+        
+        #print(output_returner)
+        #print(weight)
+        
+        #print(err)
+        output_returner=output_returner[err.argsort()]
+        output_returner=output_returner[:int(output_returner.shape[0]/2),:,:]
+        weight=weight[err.argsort()]
+        weight=weight[:int(weight.shape[0]/2)]
+        """
+        #print(output_returner)
+        #print(weight)
+        
+        return output_returner, weight
     
     
+    def bisect_vec_batch(self,v_t, target=1.e-16, maxLevel=600):
+        """Solve v = (n+2) * u^(n+1) - (n+1) * u^(n+2) for u. Vectorized"""
+        if(v_t.size(1)==0):
+            return
+        #print(v_t)
+        exp=torch.arange(self.n_final-2,0,step=-1, device=v_t.device, dtype=torch.double)
+        #B = A.unsqueeze(1).repeat(1, K, 1)
+        exp=exp.unsqueeze(0).repeat(v_t.shape[0],1)
+        level = 0
+        left  = torch.zeros_like(v_t)
+        right = torch.ones_like(v_t)
+            
+        checkV = torch.ones_like(v_t)*-1
+        u =torch.ones_like(v_t)*-1
+        error=torch.ones_like(v_t)
+        maxLevel=maxLevel/10
+        ml=maxLevel
+        oldError=100
+        while(torch.max(error)>target and ml<10*maxLevel):
+            #print("!")
+            while (level < ml):
+                u = (left + right) * (0.5**(level + 1))
+
+                checkV = self.massless_map(u,exp)
+
+
+                left *= 2.
+                right *= 2.
+                con=torch.ones_like(left)*0.5
+                adder=torch.where(v_t<=checkV, con*-1.,con)
+
+
+                left=left+(adder+0.5)
+                right=right+(adder-0.5)
+
+                level += 1
+           
+            error=torch.abs(1. - checkV / v_t)
+            #print(error)
+            #print(torch.max(error))
+            ml=ml+maxLevel
+            newError=torch.max(error)
+            if(newError>=oldError):
+                break
+            else:
+                oldError=newError
+        #print(error)
+        return u
+            
+
+    
+    def generateIntermediatesMasslessVec_batch(self, M_t, E_cm, random_variables): 
+        """Generate intermediate masses for a massless final state."""
+        
+        
+        #print(random_variables)
+        
+        u = self.bisect_vec_batch(random_variables[:,:self.n_final-2])
+        #print(u)
+        for i in range(2, self.n_final):
+            M_t[:,i-1] = torch.sqrt(u[:,i-2]*(M_t[:,i-2]**2))
+        
+        return torch.tensor([self.get_flatWeights(E_cm,self.n_final)]*random_variables.shape[0],
+                            dtype=torch.double, device=random_variables.device)
+   
+
+
+
+    def generateIntermediatesMassive_batch(self, M, E_cm, random_variables):
+        """Generate intermediate masses for a massive final state."""
+        
+       
+        
+        M[:,0] -= torch.sum(self.masses_t)
+        #print(random_variables)
+        weight = self.generateIntermediatesMasslessVec_batch(M, E_cm, random_variables)
+        
+        #print(M)
+        K_t=M.clone()
+        #print(weight)
+        masses_sum=torch.flip(torch.cumsum(torch.flip(self.masses_t,(-1,)),-1),(-1,))
+        M+=masses_sum[:-1]
+        
+        weight[:]*= 8.*self.rho(
+            M[:,self.n_final-2],
+            self.masses_t[self.n_final-1],
+            self.masses_t[self.n_final-2] )
+        #print(weight)
+        
+       
+        weight[:]*=torch.prod((self.rho(M[:,:self.n_final-2],M[:,1:],self.masses_t[:self.n_final-2])/
+                            self.rho(K_t[:,:self.n_final-2],K_t[:,1:],0.)) * (M[:,1:self.n_final-1]/K_t[:,1:self.n_final-1]),-1)
+        #print(weight)
+        
+        weight[:] *= torch.pow(K_t[:,0]/M[:,0],2*self.n_final-4)
+        #print(weight)
+        #print(random_variables)
+        
+        return weight
+ 
+    def setInitialStateMomenta_batch(self, output_momenta, E_cm):
+        """Generate the initial state momenta."""
+        if self.n_initial not in [1,2]:
+            raise PhaseSpaceGeneratorError(
+               "This PS generator only supports 1 or 2 initial states")
+
+        if self.n_initial == 1:
+            if self.initial_masses[0]==0.:
+                raise PhaseSpaceGeneratorError(
+                    "Cannot generate the decay phase-space of a massless particle.")
+            if self.E_cm != self.initial_masses[0]:
+                raise PhaseSpaceGeneratorError(
+                    "Can only generate the decay phase-space of a particle at rest.")
+
+        if self.n_initial == 1:
+            output_momenta[:,0,:] = torch.tensor([self.initial_masses[0] , 0., 0., 0.],dtype=torch.double, device=output_momenta[0].device)
+            return
+
+        elif self.n_initial == 2:
+            if self.initial_masses[0] == 0. or self.initial_masses[1] == 0.:
+                #print(output_momenta.shape)
+                output_momenta[:,0,:] = torch.tensor([E_cm/2.0 , 0., 0., +E_cm/2.0],dtype=torch.double, device=output_momenta[0].device)
+                output_momenta[:,1,:] = torch.tensor([E_cm/2.0 , 0., 0., -E_cm/2.0],dtype=torch.double, device=output_momenta[0].device)
+            else:
+                M1sq = self.initial_masses[0]**2
+                M2sq = self.initial_masses[1]**2
+                E1 = (E_cm**2+M1sq-M2sq)/ E_cm
+                E2 = (E_cm**2-M1sq+M2sq)/ E_cm
+                Z = math.sqrt(E_cm**4 - 2*E_cm**2*M1sq - 2*E_cm**2*M2sq + M1sq**2 - 2*M1sq*M2sq + M2sq**2) / E_cm
+                output_momenta[:,0,:] = torch.tensor([E1/2.0 , 0., 0., +Z/2.0],dtype=torch.double, device=output_momenta[0].device)
+                output_momenta[:,1,:] = torch.tensor([E2/2.0 , 0., 0., -Z/2.0],dtype=torch.double, device=output_momenta[0].device)
+        return
+     
 
 
 
@@ -568,48 +871,113 @@ if __name__ == '__main__':
     E_cm  = 5000.0
     dev = torch.device("cuda:"+str(4)) if torch.cuda.is_available() else torch.device("cpu")
     # Try to run the above for a 2->8.
-    my_PS_generator = FlatInvertiblePhasespace([0.]*2, [100. + 10.*i for i in range(8)],
+    my_PS_generator = FlatInvertiblePhasespace([0.]*2, [100. + 1.*i for i in range(20)],
                                             beam_Es =(E_cm/2.,E_cm/2.))
      #Try to run the above for a 2->1.    
     #my_PS_generator = FlatInvertiblePhasespace([0.]*2, [5000.0],beam_Es =(E_cm/2.,E_cm/2.))
-    random_variables = [random.random() for _ in range(my_PS_generator.nDimPhaseSpace())]
+    #random_variables = [random.random() for _ in range(my_PS_generator.nDimPhaseSpace())]
     
-    random_variables_t = torch.tensor(random_variables,dtype=torch.double,device=dev,requires_grad=True)
+    #random_variables_t = torch.tensor(random_variables,dtype=torch.double,device=dev,requires_grad=True)
+    #print(
+    random_variables_t=torch.zeros((10000,my_PS_generator.nDimPhaseSpace()),dtype=torch.double,device=dev,requires_grad=True)
+    torch.nn.init.uniform_(random_variables_t)
+    #print(random_variables_t)
+    #random_variables_t=torch.tensor([0.1910, 0.5643, 0.7181, 0.7175, 0.7094, 0.2194, 0.5448, 0.6216],dtype=torch.double,device=dev,requires_grad=True).unsqueeze(0)
+    #random_variables_t.reshape(1,my_PS_generator.nDimPhaseSpace())
+    #print(random_variables_t.shape)
+    """
+    random_variables_t=torch.tensor([[0.7815, 0.9070, 0.3209, 0.6220, 0.7973, 0.4505, 0.4114, 0.8068, 0.7152,
+        0.2266, 0.8775, 0.8282, 0.0935, 0.7161, 0.7257, 0.7893, 0.2056, 0.7841,
+        0.8924, 0.3421],[0.9707, 0.7449, 0.9737, 0.3930, 0.5915, 0.1218, 0.1633, 0.8105, 0.5696,
+        0.1380, 0.8354, 0.0779, 0.1437, 0.1031, 0.2643, 0.7506, 0.5242, 0.6434,
+        0.5960, 0.0650]],dtype=torch.double,device=dev,requires_grad=True)
+    """
+    #print(my_PS_generator.nDimPhaseSpace())
+    #print(random_variables_t.shape)
     start_time=datetime.datetime.utcnow()
         
-    momenta, wgt = my_PS_generator.generateKinematics(E_cm, random_variables_t)
+    momenta, wgt = my_PS_generator.generateKinematics_batch(E_cm, random_variables_t)
+    #print(momenta)
+    #print(torch.var(wgt))
+   # print(torch.mean(wgt))
+    #print(momenta)
+    #print(momenta[:,2,:])
+    #print(momenta[:,3,:])
+    #print(momenta[:,2,:]+momenta[:,3,:])
+    end_time=datetime.datetime.utcnow()
+    print((end_time-start_time).total_seconds())#TEST WITH 32!
+    #print(sys.float_info)
+    energy=torch.abs(torch.sum(momenta[:,2:,0],1)-torch.sum(momenta[:,:2,0],1))
+    #print(momenta)
     
+    print(energy)
+    print(torch.min(energy))
+    print(torch.max(energy))
+    count=torch.where(energy>1e-13, torch.ones_like(energy), torch.zeros_like(energy))
+    print(torch.sum(count))
+    """
+    energy=torch.abs(torch.sum(momenta[:,2:,1],1))
+    #print(momenta)
+    
+    print(energy)
+    print(torch.min(energy))
+    print(torch.max(energy))
+    energy=torch.abs(torch.sum(momenta[:,2:,2],1))
+    #print(momenta)
+    print(energy)
+    print(torch.min(energy))
+    print(torch.max(energy))
+    energy=torch.abs(torch.sum(momenta[:,2:,3],1))
+    #print(momenta)
+    print(energy)
+    print(torch.min(energy))
+    print(torch.max(energy))
+    """
+    """
+     tensor([0.7815, 0.9070, 0.3209, 0.6220, 0.7973, 0.4505, 0.4114, 0.8068, 0.7152,
+        0.2266, 0.8775, 0.8282, 0.0935, 0.7161, 0.7257, 0.7893, 0.2056, 0.7841,
+        0.8924, 0.3421], dtype=torch.float64, requires_grad=True)
+        
+        tensor([0.9707, 0.7449, 0.9737, 0.3930, 0.5915, 0.1218, 0.1633, 0.8105, 0.5696,
+        0.1380, 0.8354, 0.0779, 0.1437, 0.1031, 0.2643, 0.7506, 0.5242, 0.6434,
+        0.5960, 0.0650], dtype=torch.float64, requires_grad=True)
+
+        
+"""
     
     print ("\n =========================")
     print (" ||    PS generation    ||")
     print (" =========================")
 
-    print ("\nRandom variables :\n",random_variables_t)
-    print (momenta)
+    #print ("\nRandom variables :\n",random_variables_t)
+    #print (momenta)
     
-    print ("Phase-space weight : %.16e\n"%wgt)
-    
+    #print ("Phase-space weight : %.16e\n"%wgt)
+    #print("Phase-space weight:")
+    #print(wgt)
+    """
     variables_reconstructed, wgt_reconstructed = \
                                          my_PS_generator.invertKinematics_t(E_cm, momenta)
-    
+    """
     """
     print ("\n =========================")
     print (" || Kinematic inversion ||")
     print (" =========================")
     print ("\nReconstructed random variables :\n",variables_reconstructed)
     """
+    """
     differences = [
-        abs(variables_reconstructed[i]-random_variables[i])
+        abs(variables_reconstructed[i]-random_variables_t[i])
         for i in range(len(variables_reconstructed))
     ]
     print ("Reconstructed weight = %.16e"%wgt_reconstructed)
     if differences:
         print ("\nMax. relative diff. in reconstructed variables = %.3e"%\
-            max(differences[i]/random_variables[i] for i in range(len(differences))))
-        if(max(differences[i]/random_variables[i] for i in range(len(differences)))>1e-12):
+            max(differences[i]/random_variables_t[i] for i in range(len(differences))))
+        if(max(differences[i]/random_variables_t[i] for i in range(len(differences)))>1e-12):
             print("ALARM!!!!!!!")
     print ("Rel. diff. in PS weight = %.3e\n"%((wgt_reconstructed-wgt)/wgt))
-    
+    """
 
     print('-'*100)
    

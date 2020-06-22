@@ -1,5 +1,5 @@
 import torch
-from experiment_seq import ex
+from experiment_seq import *
 from multiprocessing import Process,Queue,Manager
 from collections import OrderedDict
 from operator import itemgetter
@@ -18,7 +18,7 @@ def my_range(start, end, step):
 if __name__ == '__main__':
   
     random=True
-    n=300
+    n=100
     best_loss_rel=1000
     best_loss=1000
     best_per=1e30
@@ -27,10 +27,11 @@ if __name__ == '__main__':
     best_id3=0
     exdict={}
     i=0
-    logdir='logs/sacred/runs8'
+    logdir='logs/sacred/hypopt_cos'
+    ex_init(logdir+"/hyp")
     if not random:
-        for bs in exp_range(5000,150000, 2): 
-            for nnl in my_range(5,9,2): 
+        for bs in exp_range(20000,160000, 2): 
+            for nnl in my_range(3,9,2): 
                 for nnw in my_range(6,10,2): 
                     for lr in exp_range(1e-5,1e-3,2):
                         for wd in exp_range(1e-7,1e-6,3):
@@ -42,12 +43,12 @@ if __name__ == '__main__':
         lr=torch.ones(1)
         wd=torch.ones(1)
         for j in range(n):
-            bs=torch.randint(5000, 100000, (1,))
+            bs=torch.randint(20000, 160000, (1,))
             nnl=torch.randint(4, 10, (1,))
-            nnw=torch.randint(5, 15, (1,))
+            nnw=torch.randint(3, 15, (1,))
             lr.uniform_(1e-6,1e-2)
-            wd.uniform_(1e-7,1e-6)
-            b=torch.randint(5, 25, (1,))
+            wd.uniform_(1e-7,1e-3)
+            b=torch.randint(3, 20, (1,))
             exdict[str(j)]={"batch_size":bs.item(),"NN_length":nnl.item(), "NN_width": nnw.item(), "lr":lr.item(),
                             "weight_decay": wd.item(),"n_bins": b.item(), "logdir":logdir}
 
@@ -58,13 +59,13 @@ if __name__ == '__main__':
         processes = []
         m=Manager()
         q=m.Queue()
-        for n in range(6):
+        for n in range(3):
             if(len(exdict)==0 ):
                 break
             run_cfg=exdict.popitem()[1]
             #run_cfg={} #!!!!
             run_cfg['q']=q
-            run_cfg['dev']=n
+            run_cfg['dev']=4+n
             run_cfg['logdir']=logdir
             config_updates={}
             config_updates['config_updates']=run_cfg
