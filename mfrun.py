@@ -97,7 +97,6 @@ def create_funv(gn, gw):
 if __name__ == '__main__':
   
 
-    ###LACKS OUTPUT OF #COUPLING CELLS!!!
 
     gpus=4
     hypopt_n=40

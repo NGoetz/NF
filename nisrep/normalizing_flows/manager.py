@@ -3,7 +3,6 @@ import copy
 import os
 import yaml
 import numpy as np
-from torch.utils.tensorboard import SummaryWriter
 from tqdm.autonotebook import tqdm
 from .layers.coupling_cells import  AffineCoupling, PWLin, PWQuad
 from .layers.layers import *
@@ -36,8 +35,7 @@ def get_bin(x, n=0):
     """
     y=format(x, 'b').zfill(n)
     return [int(i) for i in str(y)]
-    #return format(x, 'b').zfill(n)
-
+    
 def tanp(x):
     return 150*(1+((torch.tan((x-0.5)*np.pi))**2))*np.pi   #derivative for jacobian
 
@@ -55,12 +53,6 @@ class ModelAPI():
             return self._model
         else:
             raise AttributeError("No model was instantiated")
-    
-    def save_weights(self, *, logdir, prefix=""):
-        """Save the current weights"""
-        filename = os.path.join(logdir, "model_info", prefix, "weights.h5")
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        torch.save(self.model.state_dict,filename)
 
 
 class BasicManager(ModelAPI):
@@ -68,8 +60,7 @@ class BasicManager(ModelAPI):
     
 
     def __init__(self,
-                 *,
-                 n_flow:int):
+                  n_flow=2,*args):
     
         self.n_flow = n_flow
         self._model = None
@@ -118,7 +109,7 @@ class BasicManager(ModelAPI):
             filename=logdir+"/torch"
             filename2=filename+"_int"
             if not os.path.exists(logdir):
-                os.mkdir(logdir)
+                os.makedirs(logdir)
    
         try:
             if(log):
@@ -132,8 +123,10 @@ class BasicManager(ModelAPI):
 
         except:
             print("Torch save not possible")
+            
+        integ=torch.zeros((epochs+1,),device=dev)
+        err=torch.zeros((epochs+1,),device=dev)
          
-        #writer=SummaryWriter(log_dir=logdir)
         
         # Instantiate a pretty progress bar if needed
         if pretty_progressbar:
@@ -159,7 +152,7 @@ class BasicManager(ModelAPI):
        
         self.best_var=0
         maxf=0
-        #meanf=0
+        
         while (i<self.n_flow):
             w = torch.empty(2*mini_batch_size, self.n_flow).to(torch.double)
        # 
@@ -167,31 +160,29 @@ class BasicManager(ModelAPI):
             torch.nn.init.uniform_(w).to(dev)  # Generate a batch of points in latent space
        
        # Y=torch.tan((w-0.5)*(np.pi))
-       # """
-        # Run the model once
-        #torch.nn.init.normal_(w, std=10)
+       
         
             dkl=torch.nn.KLDivLoss(reduction='batchmean')
-            if torch.max(f(w))>maxf:
-                maxf=torch.max(f(w))
-            #meanf_add=torch.mean(f(w))/maxf
-            self.best_loss+=torch.var(f(w)/maxf).detach()
+            fres=f(w)
+            integ[0]+=torch.sum(fres)/(self.n_flow*2*mini_batch_size)
+            err[0]+=torch.var(fres)/(2*mini_batch_size)
+            if torch.max(fres)>maxf:
+                maxf=torch.max(fres)
+            
+            self.best_loss+=torch.var(fres/maxf).detach()
             
             i=i+1
-            #meanf+=meanf_add
             
-            self.best_var+=float((torch.var((f(w))**2)/2*mini_batch_size).detach())
-        #meanf=meanf/(self.n_flow)
+            
+            self.best_var+=float((torch.var((fres)**2)/2*mini_batch_size).detach())
         
-        #def g(x):
-         #   return f(x)-meanf
             
+        err[0]=torch.sqrt(err[0])/self.n_flow
         
         if save_best:
             
             
-            #fz=f(X)
-               
+            
             XJ = self.model(  # Pass through the model
                 self.format_input(  # Append a unit Jacobian to each point
                     w,dev
@@ -200,35 +191,24 @@ class BasicManager(ModelAPI):
             X=XJ[:,:-1]
             J = XJ[:,-1]
             self.varJ=torch.mean(J**2).detach()
-            #print(torch.var(w))
-            #print(self.varJ)
-            #print(torch.mean(J**2))
-            #print(X)
-            #print(torch.log(X))
-            #print(w)
-            #print(X)
-            #self.DKL=dkl(torch.log(w).to(dev),X.to(dev)).detach()
-            #print(dkl(torch.log(w).to(dev),XJ[:,:-1].to(dev)))
-            #print(self.DKL)
+
             self.DKL=dkl(torch.log(X+torch.ones_like(X).fill_(1e-45)).to(dev),w.to(dev)).detach()
-            #print(self.DKL)
-            #print(self.DKL)
+            
             self.best_loss=self.best_loss/self.n_flow
             
             
             
-            #print("Int")
-            #print(self.best_loss)
+           
             self.best_model=copy.deepcopy(self.model)
            
             
             self.int_loss=self.best_loss
-            #print(self.best_var)
+         
             self.best_epoch=0
             self.best_time=0
             self.best_loss_rel=torch.ones_like(self.best_loss)
-            self.func_count=1
-            self.best_func_count=1
+            self.func_count=2*mini_batch_size*self.n_flow/(batch_size/mini_batch_size)
+            self.best_func_count=2*mini_batch_size*self.n_flow/(batch_size/mini_batch_size)
             del XJ,X,J
         if(_run!=None and log):
             _run.log_scalar("training.int_loss", self.best_loss.tolist(), 0)
@@ -236,7 +216,7 @@ class BasicManager(ModelAPI):
        
            
     
-        #torch.initial_seed()
+        
         stale_save=1000
         preburner=True
       
@@ -250,17 +230,11 @@ class BasicManager(ModelAPI):
             optimizer_object.zero_grad()
             
             for j in minibatch_progress:
-               # if(i%3==0):
-                
-
-                #torch.nn.init.normal_(w, std=10)
-                #"""
+               
                 w = torch.empty(mini_batch_size, self.n_flow).to(dev).to(torch.double)
                 torch.nn.init.uniform_(w)
                 #Y=150*torch.tan((w-0.5)*(np.pi))
-                #"""
-                #print("run")
-                #w.requires_grad=True
+                
                 XJ = self.model(                                            # Pass through the model
                     self.format_input(                                      # Append a unit Jacobian to each point
                         #Y# Generate a batch of points in latent space
@@ -268,7 +242,7 @@ class BasicManager(ModelAPI):
                     )
                 )
 
-                #print(XJ)
+                
                 # Separate the points and their Jacobians:
                 # This sample is fixed, we optimize the Jacobian
                 X = (XJ[:, :-1]).detach()
@@ -280,13 +254,20 @@ class BasicManager(ModelAPI):
                 fz=torch.mul(f(X).detach(),torch.abs(torch.prod(tanp(w),axis=-1)))
                 """
                 #fz=torch.div(f(X).detach(),normal(X,0,10,self.n_flow))
-                #if(i<30 and 2*j>i):
                
                 if(preburner):
-                    fXJ=torch.mul(f(w), XJ[:, -1])/maxf
-                    
+                    fres=f(w)
+                    fXJ=torch.mul(fres, XJ[:, -1])/maxf
+                    integ[i+1]+=torch.mean(fres)/n_minibatches
+                    err[i+1]+=torch.var(fres)/mini_batch_size
+                                        
                 else:
-                    fXJ = torch.mul(f(X), XJ[:, -1])/maxf
+                    fres=torch.mul(f(X), XJ[:, -1])
+                    fXJ = fres/maxf
+                    integ[i+1]+=torch.mean(fres.detach())/n_minibatches
+                    err[i+1]+=torch.var(fres.detach())/mini_batch_size
+                    
+                    
                     
                 
                 self.func_count=self.func_count+1
@@ -294,15 +275,16 @@ class BasicManager(ModelAPI):
                 loss+=torch.var(fXJ)
                 
                 # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
+                #in newer versions, the variance estimator is used in order to increase
+                #stability for flat distributions
                 
                 var+=float(torch.var(fXJ**2)/mini_batch_size) # variance of the mean is variance/N
                 del X, fXJ, XJ
                 
-            
+      
+            err[i+1]=torch.sqrt(err[i+1]/n_minibatches)
             loss=loss/n_minibatches
-            
-                
-            
+       
             
             loss.backward()
             
@@ -318,15 +300,6 @@ class BasicManager(ModelAPI):
                
 
                 
-            """
-            # Log the relevant data for internal use
-            if logging:
-                history[str(i)]={"loss":float(loss), "std":float(std)}
-
-           
-            writer.add_scalar('loss', float(loss),i)
-            writer.add_scalar('std', float(std),i)
-            """
             self.best_func_count=self.func_count*mini_batch_size
             if save_best and (loss < self.best_loss) and not preburner:
                 self.best_loss = loss
@@ -355,29 +328,23 @@ class BasicManager(ModelAPI):
             if i%50==0 and i>51 and float(self.best_loss/stale_save)>(1-1e-4) and not preburner:
                 break
             elif i%50==0 and not preburner and (self.best_loss<self.int_loss or i>300):
-                print(self.best_loss)
-                print(stale_save)
+                #print(self.best_loss)
+                #print(stale_save)
                 stale_save=self.best_loss 
             if _run!=None and self.best_time>300:
                 break
            
         
-            if preburner and ((loss<0.15*self.best_loss) or i>100):
+            if preburner and ((loss<0.25*self.best_loss) or i>75):
                 print("preburner finished")
                 print(i)
                 preburner=False
-            """"""
-            #if save_best and (loss > 1.75*self.best_loss*self.n_flow/2 or i-self.best_epoch>150) and i>pre_i+5:
-            #    break   
            
-            
-            
-        """
-        writer.close()
-        
-        if logging:
-            self.history=history
-        """
+        self.integ_tot=torch.mean(integ)
+        self.err_tot=torch.sqrt(torch.mean(err**2))
+        if(_run!=None and log):
+            _run.log_scalar("training.integ", self.integ_tot.tolist(), 0)
+            _run.log_scalar("training.err", self.err_tot.tolist(), 0)
 
         try:
             if (log):
@@ -387,17 +354,18 @@ class BasicManager(ModelAPI):
                     'int_loss': self.int_loss,
                     'best_loss_rel' : self.best_loss_rel,
                     'best_func_count' : self.best_func_count,
-                    'model_state_dict': self.best_model.state_dict()
+                    'model_state_dict': self.best_model.state_dict(),
+                    'integ' : self.integ_tot,
+                    'err' : self.err_tot
                     },filename)
         except:
             print("Torch save not possible")
-
         
-        pass
+        
+        return (self.integ_tot.tolist(),self.err_tot.tolist())
     
   
-            
-
+     #DEPRECATED       
     def _train_variance_forward(self,rank, f, logdir, lr=3e-4,reg=1e-7,batch_size = 10000, epochs=10, epoch_start=0,
                                 logging=True, pretty_progressbar=True,  save_best=True, world_size=4, 
                                 **train_opts):
@@ -608,7 +576,7 @@ class BasicManager(ModelAPI):
       
     
     
-    
+#DEPRECATED    
 class AffineManager(BasicManager):
     
     """A manager for normalizing flows with affine coupling cells interleaved with rolling layers that
@@ -627,11 +595,12 @@ class AffineManager(BasicManager):
     format_input = AddJacobian()
     
 
-    def create_model(self,*,
+    def create_model(self,
                      n_pass_through,
                      n_cells,
                      NN,
                      roll_step,
+                     *args,
                      **opts
                      ):
         """
@@ -686,12 +655,13 @@ class PWLinManager(BasicManager):
     format_input = AddJacobian()
     
 
-    def create_model(self,*,
+    def create_model(self,
                      n_pass_through,
                      n_cells,
                      n_bins,
                      NN,
                      roll_step,
+                     *args,
                      **opts
                      ):
         """
@@ -708,9 +678,6 @@ class PWLinManager(BasicManager):
 
         """
         dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        # Explicitly setting seed to make sure that models created in two processes
-        # start from same random weights and biases.
-        #torch.manual_seed(42)
         
         self._model = torch.nn.Sequential()
         
@@ -720,7 +687,6 @@ class PWLinManager(BasicManager):
                 PWLin(flow_size=self.n_flow, pass_through_size=n_pass_through,n_bins=n_bins,
                                                 NN_layers=NN)
             )
-            #self._model.add_module("batch", BatchLayer(self.n_flow))
             self._model.add_module("roll",RollLayer(roll_step)) #add roll layer
         self._model.to(dev)
         self.best_model=self.model
@@ -749,13 +715,12 @@ class PWQuadManager(BasicManager):
     format_input = AddJacobian()
     
 
-    def create_model(self,*,
-                     #n_pass_through,
+    def create_model(self,
                      n_cells,
                      n_bins,
                      NN,
                      dev,
-                     #roll_step,
+                     *args,
                      **opts
                      ):
         """
@@ -770,7 +735,8 @@ class PWQuadManager(BasicManager):
 
         """
         if(n_cells<2*np.ceil(np.log2(self.n_flow)) and n_cells<self.n_flow):
-            print("WARNING: Too few coupling cells!")
+            print("Adjusted # coupling cells to "+str(2*np.ceil(np.log2(self.n_flow))))
+            n_cells=int(2*np.ceil(np.log2(self.n_flow)))
         dev = torch.device("cuda:"+str(dev)) if torch.cuda.is_available() else torch.device("cpu")
        
         
@@ -829,18 +795,8 @@ class PWQuadManager(BasicManager):
         self.best_model=self.model
        
         w = torch.empty(5, self.n_flow).to(torch.double)
-        #print(w.shape)
-        torch.nn.init.uniform_(w).to(dev)
-        ####
-        """
-        w=torch.arange(1.,self.n_flow+1)
-        print(w.shape)
-        w=torch.unsqueeze(w,0)
-        print(w.shape)
-        w=torch.cat((w,w),0)
-        print(w)
-        ##
-        """
+        
+        
         # Do one pass forward:
         self._model(self.format_input(w,dev)) 
         

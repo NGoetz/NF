@@ -1,5 +1,5 @@
 import torch
-from binNF.normalizing_flows.manager import *
+from nisrep.normalizing_flows.manager import *
 import matplotlib
 from pathlib import Path
 matplotlib.use('tkagg')
@@ -93,43 +93,7 @@ def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, bat
     q.put((NF.best_loss.tolist(), _run._id,NF.best_loss_rel.tolist(),NF.best_func_count, NF.varJ.tolist(),
            NF.DKL.tolist(),NF.best_var, NF.best_epoch,"NIS",(end_time-start_time).total_seconds(),internal_id))
     pass
-"""
-    w = torch.empty((12100,2)) 
-    torch.nn.init.uniform_(w,0,1)
 
-    Y=NF.format_input(w,dev)
-    X=NF.model(Y)
-    X=X.data.cpu().numpy()
-    
-    try:
-        fig = plt.figure(figsize=(12, 6))
-        a3=fig.add_subplot(111)
-        plt.hist2d(X[:,0],X[:,1],bins=25)
-    
-        axes = plt.gca()
-        axes.set_xlim([-0,1]) 
-        axes.set_ylim([-0,1])
-
-
-
-        a3.title.set_text('Point histogram (PDF)')
-        a3.tick_params(
-            axis='both',          # changes apply to the x-axis
-            which='both',      # both major and minor ticks are affected
-            bottom=True,      # ticks along the bottom edge are off
-            left=True,         # ticks along the top edge are off
-            labelbottom=True,
-            labelleft=True)
-        a3.set_aspect(aspect=1.)
-        if(NF.best_var.tolist()<0.02):
-            plt.savefig(logdir+'/'+str(_run._id)+'pdf.png', dpi=50)
-            ex.add_artifact(logdir+'/'+str(_run._id)+'pdf.png')
-        else:
-            print("plot not necessary")
-    except:
-        print("plot not possible")
-    """
-    #return NF.best_var
     
 
    

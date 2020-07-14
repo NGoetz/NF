@@ -75,20 +75,18 @@ def run():
     int_var=checkpoint['int_var']
     end_loss=checkpoint['end_loss']
     end_var=checkpoint['end_var']
-    #best_epoch=checkpoint['best_epoch']
     NF.model.eval()
     print('Initial loss')
     print(int_loss)
     print('Initial variance')
     print(int_var)
-    #print('Epoch of best result')
-    #print(best_epoch)
+    
     print('End loss')
     print(end_loss)
     print('End variance')
     print(end_var)
     
-    #shm.del()
+    
     w = torch.empty((12100,2)) 
     torch.nn.init.uniform_(w,0,1)
    

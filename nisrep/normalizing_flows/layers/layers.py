@@ -2,6 +2,7 @@ import torch
 import numpy as np
 
 
+
 def tanp(input):
     return (1+((torch.tan((input-0.5)*np.pi))**2))*np.pi   #derivative for jacobian    
 
@@ -58,13 +59,13 @@ class Reshape(torch.nn.Module):
     """
         Reshaping layer
     """
-    def __init__(self, *shapes: int):
-        super().__init__()
-        self.shapes: typing.Tuple[int] = shapes
+    def __init__(self, shapes1, shapes2):
+        super(Reshape, self).__init__()
+        self.shapes=(shapes1,shapes2)
 
     def forward(self, tensor):
-        return torch.reshape(tensor.clone(), (tensor.shape[0], *self.shapes))
-
+        return torch.reshape(tensor.clone(), (tensor.shape[0], self.shapes[0], self.shapes[1])) 
+    
 class AddJacobian(torch.nn.Module):
     """
         Class adding a row for the Jacobian values
@@ -112,7 +113,6 @@ class BatchLayer(torch.nn.Module):
             derv=torch.div(derv,torch.sqrt(var[i]+1e-05))
         y2=x[:,-1]*derv
         y2=torch.unsqueeze(y2, axis=-1)
-        print(torch.cat((y1,y2), axis=-1))
         return torch.cat((y1,y2), axis=-1)
 
 
