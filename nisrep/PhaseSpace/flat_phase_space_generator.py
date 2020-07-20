@@ -102,7 +102,7 @@ class VirtualPhaseSpaceGenerator(object):
     def __init__(self, initial_masses, final_masses,
                  beam_Es):
         
-        dev = torch.device("cuda:"+str(4)) if torch.cuda.is_available() else torch.device("cpu")
+        dev = torch.device("cuda:"+str(0)) if torch.cuda.is_available() else torch.device("cpu")
         self.initial_masses  = initial_masses
         self.masses_t        = torch.tensor(final_masses,requires_grad=False, dtype=torch.double, device=dev)
         self.n_initial       = len(initial_masses)
@@ -494,7 +494,7 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         
         return self.get_flatWeights(E_cm, self.n_final)
     
-    def generateKinematics_batch(self, E_cm, random_variables):
+    def generateKinematics_batch(self, E_cm, random_variables, pT_mincut=-1, delR_mincut=-1, rap_maxcut=-1):
         """Generate a self.n_initial -> self.n_final phase-space point
         using the random variables passed in argument.
         """
@@ -512,7 +512,7 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         weight = torch.ones(random_variables.shape[0],dtype=torch.double, device=random_variables.device)
         
         output_momenta_t=[]
-        
+        self.masses_t=self.masses_t.to(random_variables.device)
         mass = self.masses_t[0]
         if self.n_final == 1:
             if self.n_initial == 1:
@@ -545,9 +545,23 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         
         rnd=random_variables[:,self.n_final-2:3*self.n_final-4]
         
+        r2=torch.empty_like(rnd[:,0::2])
         cos_theta_t=(2.*rnd[:,0::2]-1.)
+        theta_t=torch.acos(cos_theta_t)
         sin_theta_t=(torch.sqrt(1.-cos_theta_t**2))
+        
+        pT=q_t.squeeze(1)*sin_theta_t.squeeze(1)
         phi_t=2*math.pi*rnd[:,1::2]
+        factor=torch.where(pT<torch.ones_like(pT)*pT_mincut,torch.zeros_like(weight),torch.ones_like(weight))
+        for i in range(cos_theta_t.shape[1]):
+            for j in range(cos_theta_t.shape[1]):
+                if i!=j:
+                    factor*=torch.where(torch.sqrt((phi_t[:,i]-phi_t[:,j])**2+(cos_theta_t[:,i]-cos_theta_t[:,j])**2)
+                                        <torch.ones_like(pT)*delR_mincut,torch.zeros_like(weight),torch.ones_like(weight))
+        
+        weight=weight*factor
+        
+        
         cos_phi_t=torch.cos(phi_t)
         sqrt=torch.sqrt(1.-cos_phi_t**2)
         sin_phi_t=(torch.where(phi_t>math.pi,-sqrt,sqrt))
@@ -586,7 +600,21 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         
         output_returner[:,-1,:]=Q_t
         
-        self.setInitialStateMomenta_batch(output_returner,E_cm) 
+        self.setInitialStateMomenta_batch(output_returner,E_cm)
+        if(rap_maxcut>0):
+            factor*=torch.where(rap_maxcut<
+                                torch.max(0.5*torch.log((output_returner[:,2:,0]+output_returner[:,2:,3])
+                                                        /(output_returner[:,2:,0]-
+                                                          output_returner[:,2:,3])),axis=1).values,
+                                torch.zeros_like(weight),torch.ones_like(weight))
+            """
+            print(torch.max(0.5*torch.log((output_returner[:,:,0]+output_returner[:,:,3])
+                                                        /(output_returner[:,:,0]-
+                                                          output_returner[:,:,3])),axis=1).values)
+                                                          """
+            
+        weight=weight*factor
+        
         return output_returner, weight
     
     

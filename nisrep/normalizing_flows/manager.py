@@ -73,8 +73,8 @@ class BasicManager(ModelAPI):
     
     def _train_variance_forward_seq(self, f, optimizer_object, logdir, batch_size = 10000, epochs=10, epoch_start=0,
                                 logging=True, pretty_progressbar=True,  
-                                    save_best=True, _run=None,n=0,log=True,mini_batch_size=20000,
-                                **train_opts):
+                                    save_best=True, _run=None,n=0,log=True,mini_batch_size=20000, integrate=False,
+                                    preburn_time=75,**train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
         
@@ -126,6 +126,7 @@ class BasicManager(ModelAPI):
             
         integ=torch.zeros((epochs+1,),device=dev)
         err=torch.zeros((epochs+1,),device=dev)
+        filterl=torch.zeros((epochs+1,),device=dev)
          
         
         # Instantiate a pretty progress bar if needed
@@ -177,7 +178,7 @@ class BasicManager(ModelAPI):
             self.best_var+=float((torch.var((fres)**2)/2*mini_batch_size).detach())
         
             
-        err[0]=torch.sqrt(err[0])/self.n_flow
+        err[0]=torch.sqrt(err[0]/self.n_flow)
         
         if save_best:
             
@@ -274,6 +275,7 @@ class BasicManager(ModelAPI):
                 
                 loss+=torch.var(fXJ)
                 
+                
                 # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
                 #in newer versions, the variance estimator is used in order to increase
                 #stability for flat distributions
@@ -283,9 +285,12 @@ class BasicManager(ModelAPI):
                 
       
             err[i+1]=torch.sqrt(err[i+1]/n_minibatches)
+           
             loss=loss/n_minibatches
-       
             
+            if( not preburner and loss>self.int_loss):
+                filterl[i+1]=1
+            #print("ERR: "+str(err[i+1])+"LOSS: "+str(loss)+"FILTER: "+str(filterl[i+1]))
             loss.backward()
             
             optimizer_object.step()
@@ -325,9 +330,9 @@ class BasicManager(ModelAPI):
                 elif counter>5:
                     break
             last_loss=loss
-            if i%50==0 and i>51 and float(self.best_loss/stale_save)>(1-1e-4) and not preburner:
+            if i%preburn_time==0 and i>(preburn_time+1) and float(self.best_loss/stale_save)>(1-1e-4) and not preburner:
                 break
-            elif i%50==0 and not preburner and (self.best_loss<self.int_loss or i>300):
+            elif i%preburn_time==0 and not preburner and (self.best_loss<self.int_loss or i>300):
                 #print(self.best_loss)
                 #print(stale_save)
                 stale_save=self.best_loss 
@@ -335,11 +340,33 @@ class BasicManager(ModelAPI):
                 break
            
         
-            if preburner and ((loss<0.25*self.best_loss) or i>75):
-                print("preburner finished")
-                print(i)
+            if preburner and ((loss<0.25*self.best_loss) or i>preburn_time):
+                #print("preburner finished")
+                #print(i)
                 preburner=False
-           
+            
+         
+        
+        endpoint=i+1
+        if(integrate and endpoint<epochs-1):
+            model=self.best_model
+            for s in range(endpoint,epochs):
+                for t in range(n_minibatches):
+                    w = torch.empty(mini_batch_size, self.n_flow).to(dev).to(torch.double)
+                    torch.nn.init.uniform_(w)
+
+                    XJ = model(self.format_input(w,dev)).detach() 
+                    fres=torch.mul(f(XJ[:,:-1]), XJ[:, -1])
+                    integ[s+1]+=torch.mean(fres.detach())/n_minibatches
+                    err[s+1]+=torch.var(fres.detach())/mini_batch_size
+                err[s+1]=torch.sqrt(err[s+1]/n_minibatches)
+       
+        mask=filterl.le(0.5)
+        integ=torch.masked_select(integ,mask)
+        err=torch.masked_select(err, mask)
+        #print(integ)
+        #print(err)
+        #print(torch.max(err))
         self.integ_tot=torch.mean(integ)
         self.err_tot=torch.sqrt(torch.mean(err**2))
         if(_run!=None and log):

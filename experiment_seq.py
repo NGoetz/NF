@@ -66,9 +66,14 @@ def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, bat
 
     optim = torch.optim.Adamax(NF._model.parameters(),lr=lr, weight_decay=weight_decay) 
 
-    NF._train_variance_forward_seq(f,optim,logdir,batch_size,epoch_length,0,True, False,True,_run,dev,log)
+    sig,sig_err=NF._train_variance_forward_seq(f,optim,logdir,batch_size,epoch_length,0,True, False,True,_run,dev,log)
     end_time=datetime.datetime.utcnow()
     
+    print('RESULT')
+    print(str(sig) + " +/- " +str(sig_err))
+    sig=sig/(2.56819*10**(-9)) #GeV**2 -> pb
+    sig_err=sig_err/(2.56819*10**(-9))
+    print(str(sig) + " +/- " +str(sig_err))
     print('Initial loss')
     print(NF.int_loss)
     print('Epoch of best result')
@@ -80,6 +85,8 @@ def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, bat
     
     
     if(_run!=None):
+            _run.log_scalar("training.a_integral", sig.tolist(), 0)
+            _run.log_scalar("training.a_error", (sig_err).tolist(), 0)
             _run.log_scalar("training.best_loss", NF.best_loss.tolist(), 0)
             _run.log_scalar("training.best_loss_rel", (NF.best_loss_rel).tolist(), 0)
             _run.log_scalar("training.best_loss_var", NF.best_var,0)
@@ -91,7 +98,8 @@ def run(_run,n_flow, n_cells, n_bins, NN_length, NN_width, lr, weight_decay, bat
             
     
     q.put((NF.best_loss.tolist(), _run._id,NF.best_loss_rel.tolist(),NF.best_func_count, NF.varJ.tolist(),
-           NF.DKL.tolist(),NF.best_var, NF.best_epoch,"NIS",(end_time-start_time).total_seconds(),internal_id))
+           NF.DKL.tolist(),NF.best_var, NF.best_epoch,"NIS",(end_time-start_time).total_seconds(),internal_id,sig.tolist(), 
+           sig_err.tolist()))
     pass
 
     
