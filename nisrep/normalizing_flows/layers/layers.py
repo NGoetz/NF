@@ -12,7 +12,7 @@ class MaskLayer(torch.nn.Module):
         Masking layer
     """
     def __init__(self, dims_bin, pos,dev):
-        super().__init__()
+        super(MaskLayer, self).__init__()
      
         
         
@@ -39,7 +39,7 @@ class DeMaskLayer(torch.nn.Module):
         DeMasking layer
     """
     def __init__(self, first, second):
-        super().__init__()
+        super(DeMaskLayer, self).__init__()
         self.list_ind=torch.unsqueeze(torch.squeeze(torch.cat((first,second),0),-1),0)
         
 

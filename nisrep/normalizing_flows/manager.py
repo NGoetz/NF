@@ -73,8 +73,8 @@ class BasicManager(ModelAPI):
     
     def _train_variance_forward_seq(self, f, optimizer_object, logdir, batch_size = 10000, epochs=10, epoch_start=0,
                                 logging=True, pretty_progressbar=True,  
-                                    save_best=True, _run=None,n=0,log=True,mini_batch_size=20000, integrate=False,
-                                    preburn_time=75,**train_opts):
+                                    save_best=True, _run=None,n=0,log=True,mini_batch_size=2000, integrate=False,
+                                    preburn_time=75, kill_counter=10, impr_ratio=1e-3,**train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
         
@@ -324,13 +324,13 @@ class BasicManager(ModelAPI):
                 counter=0
             else:
                 counter+=1
-                if counter>5 and preburner:
+                if counter>kill_counter and preburner:
                     counter=0
                     preburner=False
-                elif counter>5:
+                elif counter>kill_counter:
                     break
             last_loss=loss
-            if i%preburn_time==0 and i>(preburn_time+1) and float(self.best_loss/stale_save)>(1-1e-4) and not preburner:
+            if i%preburn_time==0 and i>(preburn_time+1) and float(self.best_loss/stale_save)>(1-impr_ratio) and not preburner:
                 break
             elif i%preburn_time==0 and not preburner and (self.best_loss<self.int_loss or i>300):
                 #print(self.best_loss)
@@ -360,6 +360,7 @@ class BasicManager(ModelAPI):
                     integ[s+1]+=torch.mean(fres.detach())/n_minibatches
                     err[s+1]+=torch.var(fres.detach())/mini_batch_size
                 err[s+1]=torch.sqrt(err[s+1]/n_minibatches)
+                self.best_func_count=self.best_func_count+1
        
         mask=filterl.le(0.5)
         integ=torch.masked_select(integ,mask)
@@ -762,8 +763,14 @@ class PWQuadManager(BasicManager):
 
         """
         if(n_cells<2*np.ceil(np.log2(self.n_flow)) and n_cells<self.n_flow):
-            print("Adjusted # coupling cells to "+str(2*np.ceil(np.log2(self.n_flow))))
-            n_cells=int(2*np.ceil(np.log2(self.n_flow)))
+            
+            if(self.n_flow<=6):
+                n_cells=self.n_flow
+            elif self.n_flow==7:
+                n_cells=6
+            else:
+                n_cells=int(2*np.ceil(np.log2(self.n_flow)))
+            print("Adjusted # coupling cells to "+str(n_cells))
         dev = torch.device("cuda:"+str(dev)) if torch.cuda.is_available() else torch.device("cpu")
        
         
