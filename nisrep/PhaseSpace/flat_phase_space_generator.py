@@ -6,7 +6,6 @@ import logging
 import math
 import copy
 import datetime
-import subprocess
 import sys
 from nisrep.PhaseSpace.utils import *
 
