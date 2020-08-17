@@ -2,7 +2,6 @@ import torch
 import numpy as np
 from experiment_seq import *
 from experiment_vegas import *
-from multiprocessing import Process,Queue,Manager
 from collections import OrderedDict
 import datetime
 

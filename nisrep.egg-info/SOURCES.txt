@@ -1,12 +1,16 @@
 README.md
 setup.py
 nisrep/__init__.py
+nisrep/experiment_mg.py
+nisrep/experiment_seq.py
+nisrep/experiment_vegas.py
 nisrep.egg-info/PKG-INFO
 nisrep.egg-info/SOURCES.txt
 nisrep.egg-info/dependency_links.txt
 nisrep.egg-info/top_level.txt
 nisrep/PhaseSpace/__init__.py
 nisrep/PhaseSpace/flat_phase_space_generator.py
+nisrep/PhaseSpace/utils.py
 nisrep/normalizing_flows/__init__.py
 nisrep/normalizing_flows/manager.py
 nisrep/normalizing_flows/misc.py

@@ -3,10 +3,6 @@ import numpy as np
 
 
 
-def tanp(input):
-    return (1+((torch.tan((input-0.5)*np.pi))**2))*np.pi   #derivative for jacobian    
-
-
 class MaskLayer(torch.nn.Module):
     """
         Masking layer

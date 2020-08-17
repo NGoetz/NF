@@ -1,9 +1,6 @@
 import torch
 from nisrep.normalizing_flows.manager import *
-import matplotlib
 from pathlib import Path
-matplotlib.use('tkagg')
-import matplotlib.pyplot as plt
 import numpy as np
 from sacred import Experiment
 from sacred.observers import FileStorageObserver
@@ -29,6 +26,7 @@ def csq(x):
 def ex_init(logdir):
     LOGDIR=logdir
     ex.observers.append(FileStorageObserver(LOGDIR))
+    
 
 @ex.config
 def cfg():

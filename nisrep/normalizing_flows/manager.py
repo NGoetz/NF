@@ -8,11 +8,10 @@ from .layers.coupling_cells import  AffineCoupling, PWLin, PWQuad
 from .layers.layers import *
 from .misc import tqdm_recycled
 from statistics import mean
-from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.distributed as dist
 import time
+import gc
 import datetime
-
+import math
 
 
 
@@ -36,11 +35,6 @@ def get_bin(x, n=0):
     y=format(x, 'b').zfill(n)
     return [int(i) for i in str(y)]
     
-def tanp(x):
-    return 150*(1+((torch.tan((x-0.5)*np.pi))**2))*np.pi   #derivative for jacobian
-
-def atanp(x):
-    return (1/150)*(np.pi/(x**2+np.pi**2))   #derivative for jacobian
 
 def normal(x,mu, sigma, n_flow):
     return (torch.exp(-torch.sum((x-mu)**2/(2*sigma**2),-1)))/(sigma*np.sqrt((2*np.pi)**n_flow))
@@ -67,39 +61,30 @@ class BasicManager(ModelAPI):
         self._inverse_model = None
     
         self.optimizer_object = None
-        os.environ['MASTER_ADDR'] = '127.0.1.1'
-        os.environ['MASTER_PORT'] = '2222'
 
     
-    def _train_variance_forward_seq(self, f, optimizer_object, logdir, batch_size = 10000, epochs=10, epoch_start=0,
-                                logging=True, pretty_progressbar=True,  
-                                    save_best=True, _run=None,n=0,log=True,mini_batch_size=2000, integrate=False,
-                                    preburn_time=75, kill_counter=10, impr_ratio=1e-3,**train_opts):
+    def _train_variance_forward_seq(self, f, optimizer_object, log=True, logdir=None, batch_size = 10000, epochs=10,
+                                    epoch_start=0,
+                               pretty_progressbar=True,  
+                                    save_best=True, run=None,dev=0,mini_batch_size=2000, integrate=False,
+                                    preburn_time=75, kill_counter=7, impr_ratio=1e-2):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
-        
-
-        Args:
-            f ():
-            batch_size ():
-            epochs ():
-            epoch_start ():
-            logging ():
-            pretty_progressbar ():
-            optimizer_object ():
-            logdir():
-            **train_opts ():
-
-        Returns: None
 
         """
         
-        dev = torch.device("cuda:"+str(n)) if torch.cuda.is_available() else torch.device("cpu")
+        dev = torch.device("cuda:"+str(dev)) if torch.cuda.is_available() else torch.device("cpu")
         
-        assert mini_batch_size<=batch_size, "The minibatch size must be smaller than the batch size"
+        if preburn_time>10:
+            check_time=preburn_time
+        else:
+            check_time=50
+        
+        if(mini_batch_size>batch_size):
+            mini_batch_size=batch_size
         n_minibatches = int(batch_size/mini_batch_size)
         
-        if(_run!=None and log): 
+        if(run!=None and log): 
             filename=logdir+"/"+str(_run._id)+"/torch"
             filename2=filename+"_int"
             if not os.path.exists(logdir+"/"+str(_run._id)):
@@ -126,7 +111,7 @@ class BasicManager(ModelAPI):
             
         integ=torch.zeros((epochs+1,),device=dev)
         err=torch.zeros((epochs+1,),device=dev)
-        filterl=torch.zeros((epochs+1,),device=dev)
+        
          
         
         # Instantiate a pretty progress bar if needed
@@ -141,12 +126,7 @@ class BasicManager(ModelAPI):
         else:
             epoch_progress = range(epoch_start, epoch_start+epochs)
             minibatch_progress = range(n_minibatches)
-        """
-#######################################
-        # Keep track of metric history if needed
-        if logging:
-            history = {}
-        """
+
         i=0
         self.model.to(dev)
         self.best_loss=0
@@ -156,21 +136,21 @@ class BasicManager(ModelAPI):
         
         while (i<self.n_flow):
             w = torch.empty(2*mini_batch_size, self.n_flow).to(torch.double)
-       # 
-        
+     
             torch.nn.init.uniform_(w).to(dev)  # Generate a batch of points in latent space
        
-       # Y=torch.tan((w-0.5)*(np.pi))
+      
        
         
             dkl=torch.nn.KLDivLoss(reduction='batchmean')
             fres=f(w)
             integ[0]+=torch.sum(fres)/(self.n_flow*2*mini_batch_size)
-            err[0]+=torch.var(fres)/(2*mini_batch_size)
+            err[0]+=torch.var(fres)/(self.n_flow)
             if torch.max(fres)>maxf:
-                maxf=torch.max(fres)
+                maxf=torch.max(fres) 
             
-            self.best_loss+=torch.var(fres/maxf).detach()
+            self.best_loss+=torch.var(fres/maxf).detach()/self.n_flow
+           
             
             i=i+1
             
@@ -178,9 +158,9 @@ class BasicManager(ModelAPI):
             self.best_var+=float((torch.var((fres)**2)/2*mini_batch_size).detach())
         
             
-        err[0]=torch.sqrt(err[0]/self.n_flow)
         
-        if save_best:
+        
+        if save_best or log:
             
             
             
@@ -195,26 +175,21 @@ class BasicManager(ModelAPI):
 
             self.DKL=dkl(torch.log(X+torch.ones_like(X).fill_(1e-45)).to(dev),w.to(dev)).detach()
             
-            self.best_loss=self.best_loss/self.n_flow
-            
-            
-            
-           
+
             self.best_model=copy.deepcopy(self.model)
            
-            
-            self.int_loss=self.best_loss
-         
+
             self.best_epoch=0
             self.best_time=0
             self.best_loss_rel=torch.ones_like(self.best_loss)
             self.func_count=2*mini_batch_size*self.n_flow/(batch_size/mini_batch_size)
             self.best_func_count=2*mini_batch_size*self.n_flow/(batch_size/mini_batch_size)
             del XJ,X,J
-        if(_run!=None and log):
-            _run.log_scalar("training.int_loss", self.best_loss.tolist(), 0)
-
+        if(run!=None and log):
+            run.log_scalar("training.int_loss", self.best_loss.tolist(), 0)
        
+
+        self.int_loss=self.best_loss
            
     
         
@@ -223,6 +198,7 @@ class BasicManager(ModelAPI):
       
         counter=0
         last_loss=1000
+        #print("START")
         for i in epoch_progress:
             loss = 0
             loss2=0
@@ -231,14 +207,13 @@ class BasicManager(ModelAPI):
             optimizer_object.zero_grad()
             
             for j in minibatch_progress:
-               
+                
                 w = torch.empty(mini_batch_size, self.n_flow).to(dev).to(torch.double)
                 torch.nn.init.uniform_(w)
-                #Y=150*torch.tan((w-0.5)*(np.pi))
+               
                 
                 XJ = self.model(                                            # Pass through the model
                     self.format_input(                                      # Append a unit Jacobian to each point
-                        #Y# Generate a batch of points in latent space
                         w,dev
                     )
                 )
@@ -247,31 +222,26 @@ class BasicManager(ModelAPI):
                 # Separate the points and their Jacobians:
                 # This sample is fixed, we optimize the Jacobian
                 X = (XJ[:, :-1]).detach()
-                #Z=torch.atan(X/100)/(100*np.pi)+0.5
 
-
-                #jacs=torch.mul(torch.abs(torch.prod(tanp(w),axis=-1)),torch.abs(torch.prod(atanp(X),axis=-1)))
-                """
-                fz=torch.mul(f(X).detach(),torch.abs(torch.prod(tanp(w),axis=-1)))
-                """
-                #fz=torch.div(f(X).detach(),normal(X,0,10,self.n_flow))
                
                 if(preburner):
                     fres=f(w)
                     fXJ=torch.mul(fres, XJ[:, -1])/maxf
+                    
                     integ[i+1]+=torch.mean(fres)/n_minibatches
-                    err[i+1]+=torch.var(fres)/mini_batch_size
+                    err[i+1]+=torch.var(fres)/n_minibatches
                                         
                 else:
                     fres=torch.mul(f(X), XJ[:, -1])
                     fXJ = fres/maxf
+                    
                     integ[i+1]+=torch.mean(fres.detach())/n_minibatches
-                    err[i+1]+=torch.var(fres.detach())/mini_batch_size
+                    err[i+1]+=torch.var(fres.detach())/n_minibatches
                     
+               
                     
-                    
-                
-                self.func_count=self.func_count+1
+                if(save_best):
+                    self.func_count=self.func_count+1
                 
                 loss+=torch.var(fXJ)
                 
@@ -282,15 +252,14 @@ class BasicManager(ModelAPI):
                 
                 var+=float(torch.var(fXJ**2)/mini_batch_size) # variance of the mean is variance/N
                 del X, fXJ, XJ
+                gc.collect()
                 
       
-            err[i+1]=torch.sqrt(err[i+1]/n_minibatches)
+           
            
             loss=loss/n_minibatches
+           
             
-            if( not preburner and loss>self.int_loss):
-                filterl[i+1]=1
-            #print("ERR: "+str(err[i+1])+"LOSS: "+str(loss)+"FILTER: "+str(filterl[i+1]))
             loss.backward()
             
             optimizer_object.step()
@@ -299,14 +268,14 @@ class BasicManager(ModelAPI):
             # Update the progress bar
             if pretty_progressbar:
                 epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
-            if(_run!=None and log):       
-                _run.log_scalar("training.loss", loss.tolist(), i)
-                _run.log_scalar("training.loss_rel",(loss/self.int_loss).tolist(),i)
+            if(run!=None and log):       
+                run.log_scalar("training.loss", loss.tolist(), i)
+                run.log_scalar("training.loss_rel",(loss/self.int_loss).tolist(),i)
                
 
-                
-            self.best_func_count=self.func_count*mini_batch_size
-            if save_best and (loss < self.best_loss) and not preburner:
+            if (save_best or log):     
+                self.best_func_count=self.func_count*mini_batch_size
+            if (save_best or log) and (loss < self.best_loss) and not preburner:
                 self.best_loss = loss
                 self.best_var=var
                 self.best_loss_rel=loss/self.int_loss
@@ -314,8 +283,8 @@ class BasicManager(ModelAPI):
                 self.best_epoch=i
                 
                 
-                if(_run!=None):
-                    self.best_time=(datetime.datetime.utcnow()-_run.start_time).total_seconds()
+                if(run!=None):
+                    self.best_time=(datetime.datetime.utcnow()-run.start_time).total_seconds()
                 else:
                     self.best_time=0
                 
@@ -330,49 +299,46 @@ class BasicManager(ModelAPI):
                 elif counter>kill_counter:
                     break
             last_loss=loss
-            if i%preburn_time==0 and i>(preburn_time+1) and float(self.best_loss/stale_save)>(1-impr_ratio) and not preburner:
+            if ( i%check_time==0) and i>(preburn_time+1) and float(self.best_loss/stale_save)>(1-impr_ratio) and not preburner:
                 break
-            elif i%preburn_time==0 and not preburner and (self.best_loss<self.int_loss or i>300):
-                #print(self.best_loss)
-                #print(stale_save)
+            elif  i%check_time==0 and not preburner and (self.best_loss<self.int_loss or i>300):
+                
                 stale_save=self.best_loss 
-            if _run!=None and self.best_time>300:
-                break
+           
            
         
             if preburner and ((loss<0.25*self.best_loss) or i>preburn_time):
-                #print("preburner finished")
-                #print(i)
+               
                 preburner=False
             
+            
          
-        
-        endpoint=i+1
-        if(integrate and endpoint<epochs-1):
-            model=self.best_model
-            for s in range(endpoint,epochs):
-                for t in range(n_minibatches):
-                    w = torch.empty(mini_batch_size, self.n_flow).to(dev).to(torch.double)
-                    torch.nn.init.uniform_(w)
-
-                    XJ = model(self.format_input(w,dev)).detach() 
-                    fres=torch.mul(f(XJ[:,:-1]), XJ[:, -1])
-                    integ[s+1]+=torch.mean(fres.detach())/n_minibatches
-                    err[s+1]+=torch.var(fres.detach())/mini_batch_size
-                err[s+1]=torch.sqrt(err[s+1]/n_minibatches)
-                self.best_func_count=self.best_func_count+1
        
-        mask=filterl.le(0.5)
-        integ=torch.masked_select(integ,mask)
-        err=torch.masked_select(err, mask)
-        #print(integ)
-        #print(err)
-        #print(torch.max(err))
-        self.integ_tot=torch.mean(integ)
-        self.err_tot=torch.sqrt(torch.mean(err**2))
-        if(_run!=None and log):
-            _run.log_scalar("training.integ", self.integ_tot.tolist(), 0)
-            _run.log_scalar("training.err", self.err_tot.tolist(), 0)
+        endpoint=i+1
+        with torch.no_grad():
+            if(integrate and endpoint<epochs-1):
+                model=self.best_model.eval()
+                for s in range(endpoint,epochs):
+                    for t in range(n_minibatches):
+                        w = torch.empty(mini_batch_size, self.n_flow).to(dev).to(torch.double)
+                        torch.nn.init.uniform_(w)
+
+                        XJ = model(self.format_input(w,dev)).detach() 
+                        fres=torch.mul(f(XJ[:,:-1]), XJ[:, -1])
+                        integ[s+1]+=torch.mean(fres.detach())/n_minibatches
+                        err[s+1]+=torch.var(fres.detach())/n_minibatches
+                    
+                    self.best_func_count=self.best_func_count+1
+       
+       
+        self.integ_tot=torch.sum(integ/err)/torch.sum(1/err)
+        self.err_tot=torch.sqrt(1/torch.sum(1/err))/math.sqrt(epochs)
+        
+        
+        
+        if(run!=None and integrate):
+            run.log_scalar("training.integ", self.integ_tot.tolist(), 0)
+            run.log_scalar("training.err", self.err_tot.tolist(), 0)
 
         try:
             if (log):
@@ -389,222 +355,18 @@ class BasicManager(ModelAPI):
         except:
             print("Torch save not possible")
         
+        del loss, var, w, optimizer_object
         
-        return (self.integ_tot.tolist(),self.err_tot.tolist())
+        if(integrate):
+            return (self.integ_tot.detach().tolist(),self.err_tot.detach().tolist())
+        else:
+            return (0,0)
     
   
-     #DEPRECATED       
-    def _train_variance_forward(self,rank, f, logdir, lr=3e-4,reg=1e-7,batch_size = 10000, epochs=10, epoch_start=0,
-                                logging=True, pretty_progressbar=True,  save_best=True, world_size=4, 
-                                **train_opts):
-        """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
-        (fixed latent space sample mapped to a phase space sample)
-        
-
-        Args:
-            f ():
-            batch_size ():
-            epochs ():
-            epoch_start ():
-            logging ():
-            pretty_progressbar ():
-            optimizer_object ():
-            logdir():
-            **train_opts ():
-
-        Returns: history
-
-        """
-        
-        timestr = time.strftime("%Y%m%d-%H%M%S")
-        filename=logdir+"loss-model"+".txt"
-        file= open(filename,"w+")
-        file.close()
-        optimizer_object = torch.optim.Adamax(self._model.parameters(),lr=lr, weight_decay=reg) 
-        
-        
-        
-        dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        
-        
-        w = torch.empty(batch_size, self.n_flow)
-      
-        torch.nn.init.uniform_(w).to(dev)  # Generate a batch of points in latent space
-       
-        self.model.to(dev)
-        XJ = self.model(  # Pass through the model
-            self.format_input(  # Append a unit Jacobian to each point
-                w, dev
-            )
-          )
-        
-        
-        
-        if logging:
-            X=XJ[:,:-1]
-            #fz=torch.div(f(X),normal(X,0,10,self.n_flow))
-            fz=f(X)
-            J = XJ[:,-1]
-            int_std = torch.std(fz*J)
-            int_loss=torch.mean((fz*J)**2)
-            best_model=self.model
-            int_var=torch.var((fz*J)**2)
-            best_std=int_std
-            best_loss=int_loss
-            best_var=int_var
-            best_epoch=0
-        if rank==0:
-            writer=SummaryWriter(log_dir=logdir)
-           
-        
-        
-        if(dev==torch.device("cuda")):
-            dist.init_process_group("nccl", rank=rank, init_method='env://', world_size=world_size)
-        else:
-            dist.init_process_group("gloo", rank=rank, init_method='env://', world_size=world_size)
-         
-        
-        
-        
-        if dev == torch.device("cuda"):
-           # n = torch.cuda.device_count()
-            #if n>6:
-            #    n=6
-            #n=n//world_size
-            device_ids = list(range(rank, (rank + 1)))
-            self.model.to(device_ids[0])
-            self.modelp=DDP(self.model, device_ids=device_ids)
-            devp=torch.device("cuda:"+str(device_ids[0]))
-        else:
-            self.modelp=DDP(self.model, None)
-            devp=dev
-            
-            
-        # Instantiate a pretty progress bar if needed
-        if pretty_progressbar:
-            epoch_progress = tqdm(range(epoch_start,epoch_start+epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
-        else:
-            epoch_progress = range(epoch_start, epoch_start+epochs)
-            
-#######################################
-        
-            
-            
-        """
-        shm[0]=0
-        shm[1]=0
-        shm[2]=0
-        shm[3]=int_loss
-        shm[4]=0
-        shm[5]=0
-        """
-        #shm[6]=0
-        torch.initial_seed()
-       
-        for i in epoch_progress:
-          #  if(shm[6]==1):
-           #     break
-            """
-            if(shm[4]==0):
-                shm[0]=0
-                shm[1]=0
-                shm[2]=0
-            """      
-            loss = 0
-            std = 0
-            optimizer_object.zero_grad()
-
-            
-            w = torch.empty(batch_size, self.n_flow).to(devp)
-            torch.nn.init.uniform_(w)
-
-            XJ = self.modelp(                                            # Pass through the model
-                self.format_input(                                      # Append a unit Jacobian to each point
-                    w,devp
-                )
-            )
-
-
-            # Separate the points and their Jacobians:
-            # This sample is fixed, we optimize the Jacobian
-            X = (XJ[:, :-1]).detach()
-            
-
-
-
-            fXJ = torch.mul(f(X), XJ[:, -1])
-
-            # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
-            loss = torch.mean(fXJ**2)
-            var=torch.var(fXJ**2)
-            std= torch.std(fXJ)
-            #shm[0]+=loss/world_size
-            #shm[1]+=var/world_size
-            #shm[2]+=std/world_size
-            #shm[4]+=1
-            
-
-            loss.backward()
-
-            optimizer_object.step()
-            
-
-            
-
-            """
-            if(shm[4]==world_size  and shm[0]>1e-20):
-                shm[4]=0
-                resloss=shm[0].clone()
-                resstd=shm[2].clone()
-            """   
-            if logging and rank==0:
-                writer.add_scalar('loss', float(loss),i)
-                writer.add_scalar('std', float(std),i)
-
-            # Update the progress bar
-            if pretty_progressbar:
-                #print(resloss)
-                epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
-            #TODO: fix early stopping/saving of best model!
-            """
-                if logging and resloss < shm[3] :
-                    shm[3]=resloss.clone()
-                    best_std = shm[2].clone()
-                    best_loss = resloss.clone()
-                    best_var=shm[1].clone()
-                    best_model=copy.deepcopy(self.modelp)
-                    best_epoch=i
-                    shm[5]=rank
-                shm[0]=0
-                shm[1]=0
-                shm[2]=0
-                #if(resloss>1.3*shm[3]): BUG!!
-                #    shm[6]=1
-         """ 
-            
-        if(rank==0):
-            writer.close()
-
-
-        if logging and rank==0:
-            torch.save({
-            #'best_epoch': best_epoch,
-            'end_loss': loss,
-            'end_var':var ,
-            'int_loss': int_loss,
-            'int_var':int_var,
-            'model_state_dict': self.modelp.module.state_dict()
-            },filename)
-
-
-        dist.destroy_process_group()
-
-        pass
-
-      
     
     
-#DEPRECATED    
+    
+   
 class AffineManager(BasicManager):
     
     """A manager for normalizing flows with affine coupling cells interleaved with rolling layers that
@@ -627,26 +389,11 @@ class AffineManager(BasicManager):
                      n_pass_through,
                      n_cells,
                      NN,
-                     roll_step,
-                     *args,
-                     **opts
+                     roll_step
                      ):
-        """
-
-        Args:
-            n_pass_through ():
-            n_cells ():
-            NN():
-            roll_step ():
-            **opts ():
-
-        Returns:
-
-        """
+  
         dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        # Explicitly setting seed to make sure that models created in two processes
-        # start from same random weights and biases.
-        torch.manual_seed(42)
+        
         
         self._model = torch.nn.Sequential()
         
@@ -688,23 +435,9 @@ class PWLinManager(BasicManager):
                      n_cells,
                      n_bins,
                      NN,
-                     roll_step,
-                     *args,
-                     **opts
+                     roll_step
                      ):
-        """
-
-        Args:
-            n_pass_through ():
-            n_cells ():
-            n_bins:
-            NN():
-            roll_step ():
-            **opts ():
-
-        Returns:
-
-        """
+       
         dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         
         self._model = torch.nn.Sequential()
@@ -727,17 +460,15 @@ class PWLinManager(BasicManager):
         
 class PWQuadManager(BasicManager):
     
-    """A manager for normalizing flows with piecewise-quadratic coupling cells interleaved with rolling layers that
-    apply cyclic permutations on the variables. All cells have the same number of pass through variables and the
-    same step size in the cyclic permutation.
+    """A manager for normalizing flows with piecewise-quadratic coupling cells interleaved with masking layers that
+    mask subsets of the varialbes. The cells have different numbers of pass through variables.
     Each coupling cell has a fully connected NN with a fixed number of layers (depth) of fixed size (width)
 
     Hyperparameters:
-    - n_pass_through
     - n_bins
     - nn_width
     - nn_depth
-    - roll_step
+    - n_cells
     """
 
     format_input = AddJacobian()
@@ -747,21 +478,10 @@ class PWQuadManager(BasicManager):
                      n_cells,
                      n_bins,
                      NN,
-                     dev,
-                     *args,
-                     **opts
+                     dev=0
                      ):
-        """
-
-        Args:
-            n_cells ():
-            n_bins:
-            NN():
-            **opts ():
-
-        Returns:
-
-        """
+    
+        
         if(n_cells<2*np.ceil(np.log2(self.n_flow)) and n_cells<self.n_flow):
             
             if(self.n_flow<=6):
@@ -823,17 +543,20 @@ class PWQuadManager(BasicManager):
                 else:
                     self._model.add_module("roll"+str(i_cells+2*n),RollLayer(self.n_flow-((n_cells-2*n-1)%self.n_flow)))
                     
-            
-            
+       
+        
         self._model.to(dev).to(torch.double)
         self.best_model=self.model
-       
+          
         w = torch.empty(5, self.n_flow).to(torch.double)
-        
+        torch.nn.init.uniform_(w)
+       
         
         # Do one pass forward:
-        self._model(self.format_input(w,dev)) 
         
+        self._model(self.format_input(w,dev)) 
+       
+        return  
     
 
     

@@ -1,5 +1,4 @@
 import torch
-import torch.nn.utils.weight_norm as weightNorm
 import numpy as np
 from .layers import Reshape
 
@@ -21,18 +20,18 @@ class AffineCoupling(torch.nn.Module):
         #the last layer has 2 outputs: scaling factor and translation
         sizes = NN_layers + [(2 * self.transform_size)] 
         NN_layers=[]
-        NN_layers.append(torch.nn.Tanh())
+        NN_layers.append(torch.nn.BatchNorm1d(sizes[0]))
         
         NN_layers.append(torch.nn.Linear(pass_through_size, sizes[0])) #size only one dim
        
-        #NN_layers.append(torch.nn.BatchNorm1d(sizes[0]))
+        NN_layers.append(torch.nn.BatchNorm1d(sizes[0]))
        
         NN_layers.append(torch.nn.ReLU())
         oldsize=sizes[0]
         
         for size in sizes[1:-1]:
             NN_layers.append(torch.nn.Linear(oldsize,size))
-            #NN_layers.append(torch.nn.BatchNorm1d(size))
+            NN_layers.append(torch.nn.BatchNorm1d(size))
             
             NN_layers.append(torch.nn.ReLU())
             oldsize=size
@@ -137,29 +136,34 @@ class PWLin(torch.nn.Module):
     
 class PWQuad(torch.nn.Module):
    
-    def __init__(self,flow_size, pass_through_size, n_bins,NN_layers):
+    def __init__(self,flow_size, pass_through_size, n_bins,NN_layers, run=None):
         super(PWQuad, self).__init__()
         
         self.pass_through_size = pass_through_size
         self.flow_size = flow_size
         self.transform_size = flow_size - pass_through_size
         self.n_bins=n_bins
+        self.run=run
         
         #the last layer has the bins as output
         sizes = NN_layers + [( self.transform_size*(2*self.n_bins+1))]
         self.NN=RectNN(pass_through_size,sizes,(self.transform_size,(2*self.n_bins+1))).NN
         
     def forward(self, x): 
-     
+        
+        
         xA = x[:, :self.pass_through_size]
         xB = x[:, self.pass_through_size:self.flow_size]
         xB=torch.where(xB>(torch.ones_like(xB)-1e-6),(torch.ones_like(xB)-1e-6),xB)
         
         jacobian = torch.unsqueeze(x[:, self.flow_size], -1)
+        
         Z=self.NN(xA)
-        V=Z[:,:,:self.n_bins+1]
-        W=Z[:,:,self.n_bins+1:]
        
+        V=Z[:,:,:self.n_bins+1]
+        
+        W=Z[:,:,self.n_bins+1:]
+        
         dev=W.device
         W=torch.exp(W)
         
@@ -170,6 +174,7 @@ class PWQuad(torch.nn.Module):
         W = W/Wnorms
         
         Wsum=Wsum/Wnorms
+        
         
         V=torch.exp(V)
         
@@ -186,7 +191,7 @@ class PWQuad(torch.nn.Module):
         div_ind=torch.unsqueeze(torch.argmax(torch.cat((torch.empty(Wsum.shape[0],Wsum.shape[1],1)
                                                         .fill_(1e-30).to(dev).to(torch.double),finder*Wsum),axis=-1),axis=-1),-1)
         
-
+       
         
         alphas=torch.div((xB-torch.squeeze(torch.gather(Wsum2,-1,div_ind),axis=-1)),
                          torch.squeeze(torch.gather(W,-1,div_ind),axis=-1))
@@ -201,6 +206,7 @@ class PWQuad(torch.nn.Module):
         yB2=torch.mul(torch.mul(alphas,torch.squeeze(torch.gather(V,-1,div_ind),axis=-1)),
                                 torch.squeeze(torch.gather(W,-1,div_ind),axis=-1))
        
+       
         yB=yB1+yB2+shift
         
         
@@ -210,9 +216,11 @@ class PWQuad(torch.nn.Module):
         return torch.cat((xA, yB, jacobian), axis=-1) 
         
 class RectNN(torch.nn.Module):
+    #constructs a rectangular NN
     def __init__(self,pass_through_size,sizes,reshape):
         super(RectNN, self).__init__()
         NN_layers=[]
+       
         NN_layers.append(torch.nn.BatchNorm1d(pass_through_size))
         NN_layers.append(torch.nn.Linear(pass_through_size, sizes[0],bias=False))
         NN_layers.append(torch.nn.BatchNorm1d(sizes[0]))

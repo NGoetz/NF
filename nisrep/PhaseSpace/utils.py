@@ -19,12 +19,12 @@ def set_square_t(inputt, square, negative=False):
         return ret
     
 def rho2_t(inputt):
-        """Compute the radius squared."""
+        """Compute the radius squared. Vectorized."""
         
         return torch.sum(inputt[:,1:]*inputt[:,1:],-1)
     
 def rho2_tt(inputt):
-        """Compute the radius squared."""
+        """Compute the radius squared. Vectorized and for batches."""
         
         return torch.sum(inputt[:,: ,1:]**2,-1)
     
@@ -46,19 +46,23 @@ def square_t(inputt):
         return torch.sum(inputt*inputt,-1)
     
 def dot_t(inputa,inputb):
+    """Dot product for four vectors"""
     return inputa[:,0]*inputb[:,0] - inputa[:,1]*inputb[:,1] - inputa[:,2]*inputb[:,2] - inputa[:,3]*inputb[:,3]
 
-def dot_ttt(inputa,inputb):
+def dot_fb(inputa,inputb):
+    """Dot product for four vectors in batches vectors"""
     return inputa[:,:,0]*inputb[:,:,0] + inputa[:,:,1]*inputb[:,:,1] + inputa[:,:,2]*inputb[:,:,2] 
 
-def dot_tt(inputa,inputb):
+def dot_s(inputa,inputb):
+    """Dot product for space vectors"""
     return inputa[:,0]*inputb[:,0] + inputa[:,1]*inputb[:,1] + inputa[:,2]*inputb[:,2] 
     
 def boost_t(inputt, boost_vector, gamma=-1.):
-        """Transport self into the rest frame of the boost_vector in argument.
+        """Transport inputt into the rest frame of the boost_vector in argument.
         This means that the following command, for any vector p=(E, px, py, pz)
-            p.boost(-p.boostVector())
-        transforms p to (M,0,0,0).
+            boost_t(p,-boostVector(p))
+        returns to (M,0,0,0).
+        Version for a single phase pace point
         """
         
         b2 = square_t(boost_vector)
@@ -79,10 +83,11 @@ def boost_t(inputt, boost_vector, gamma=-1.):
         return inputt
     
 def boost_tt(inputt, boost_vector, gamma=-1.):
-        """Transport self into the rest frame of the boost_vector in argument.
+        """Transport inputt into the rest frame of the boost_vector in argument.
         This means that the following command, for any vector p=(E, px, py, pz)
-            p.boost(-p.boostVector())
-        transforms p to (M,0,0,0).
+            boost_t(p,-boostVector(p))
+        returns to (M,0,0,0).
+        Version for a batch
         """
         
         b2 = square_t(boost_vector)
@@ -108,17 +113,7 @@ def cosTheta_t(inputt):
         assert (ptot > 0.)
         return inputt[3] / ptot
     
-def cosTheta_tt(inputt):
 
-        ptot =torch.sqrt(dot_tt(inputt[:,1:],inputt[:,1:]))
-        assert (torch.min(ptot) > 0.)
-        return inputt[:,3] / ptot
-    
-def cosTheta_ttt(inputt):
-
-        ptot =torch.sqrt(dot_ttt(inputt[:,:,1:],inputt[:,:,1:]))
-        assert (torch.min(ptot) > 0.)
-        return inputt[:,:,3] / ptot
 
     
 
@@ -126,9 +121,7 @@ def phi_t(inputt):
 
     return torch.atan2(inputt[2], inputt[1])
 
-def phi_tt(inputt):
-    
-    return torch.atan2(inputt[:,2], inputt[:,1])
+
 
 def uniform_distr(r,minv,maxv):
         """distributes r uniformly within (min, max), with jacobian dvariable"""
@@ -158,7 +151,7 @@ def boost_to_lab_frame( momenta, xb_1, xb_2):
     
     
 def pseudoRap(inputt, eps=np.finfo(float).eps**0.5, huge=np.finfo(float).max):
-        """Compute pseudorapidity."""
+        """Compute pseudorapidity. Single PS point"""
 
         pt = torch.sqrt(torch.sum(inputt[:,1:3]**2,axis=-1))
        
@@ -167,7 +160,7 @@ def pseudoRap(inputt, eps=np.finfo(float).eps**0.5, huge=np.finfo(float).max):
     
     
 def pseudoRap_t(inputt, eps=np.finfo(float).eps**0.5, huge=np.finfo(float).max):
-        """Compute pseudorapidity."""
+        """Compute pseudorapidity. Batch"""
 
         pt = torch.sqrt(torch.sum(inputt[:,:,1:3]**2,axis=-1))
        
