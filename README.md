@@ -42,17 +42,7 @@ NF._train_variance_forward_seq(vamel,optim,True, "./logs/tmp/",10000,300,True, T
 ```
 Afterwards, `NF.best_model` can be used for Monte-Carlo integration!
 ```
-w = torch.empty(int(var_n), NF.n_flow,device=dev)
-std=torch.zeros((20,))
-mean=torch.zeros((20,))
-for i in range(20):
-    torch.nn.init.uniform_(w)
-    Y=NF.format_input(w, dev=dev)
-    X=NF.best_model(Y)
-    std[i]=torch.std(f(X[:,:-1])*X[:,-1])
-    mean[i]=torch.mean(f(X[:,:-1])*X[:,-1])
-sig=torch.mean(mean)
-sig_err=torch.mean(std/np.sqrt(20))
+res, res_err=NF.integrate(f, nitn, neval)
 ```
 If the function is a matrix element of collision event, the phase space generator module can be used to map 
 the output of the model into the phase space:

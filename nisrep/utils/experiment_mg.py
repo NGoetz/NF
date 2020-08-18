@@ -62,7 +62,7 @@ def pro(para):
     sig=sig/(2.56819*10**(-9)) #GeV**2 -> pb
     sig_err=sig_err/(2.56819*10**(-9))
     
-    
+    dev_n=dev
     dev = torch.device("cuda:"+str(dev)) if torch.cuda.is_available() else torch.device("cpu")
     w = torch.empty(var_n, NF.n_flow, device=dev)
     torch.nn.init.uniform_(w)
@@ -95,17 +95,7 @@ def pro(para):
     file.write("Final Variance: {0:5E} \n".format(v_var))
     file.write("{0:5E}  +/- {1:3E} pb \n".format(sig,sig_err))
     
-    w = torch.empty(int(var_n/2), NF.n_flow,device=dev)
-    std=torch.zeros((20,))
-    mean=torch.zeros((20,))
-    for i in range(20):
-        torch.nn.init.uniform_(w)
-        Y=NF.format_input(w, dev=dev)
-        X=NF.best_model(Y)
-        std[i]=torch.std(f(X[:,:-1])*X[:,-1])
-        mean[i]=torch.mean(f(X[:,:-1])*X[:,-1])
-    sig=torch.mean(mean)
-    sig_err=torch.mean(std/np.sqrt(20))
+    sig, sig_err=NF.integrate(f,10,int(var_n),dev_n)
     file.write("Post training integrate:"+'\n')
     file.write("{0:5E}  +/- {1:3E} pb \n".format(sig/(2.56819*10**(-9)),sig_err/(2.56819*10**(-9))))
     file.write("Unweighting efficiency: "+str(w_mean/w_max)+'\n')

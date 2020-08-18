@@ -325,14 +325,14 @@ class BasicManager(ModelAPI):
 
                         XJ = model(self.format_input(w,dev)).detach() 
                         fres=torch.mul(f(XJ[:,:-1]), XJ[:, -1])
-                        integ[s+1]+=torch.mean(fres.detach())/n_minibatches
-                        err[s+1]+=torch.var(fres.detach())/n_minibatches
+                        integ[s+1]+=torch.mean(fres)/(n_minibatches*math.sqrt(mini_batch_size))
+                        err[s+1]+=torch.std(fres)/n_minibatches
                     
                     self.best_func_count=self.best_func_count+1
        
        
         self.integ_tot=torch.sum(integ/err)/torch.sum(1/err)
-        self.err_tot=torch.sqrt(1/torch.sum(1/err))/math.sqrt(epochs)
+        self.err_tot=torch.sqrt(1/torch.sum(1/err))
         
         
         
@@ -361,7 +361,31 @@ class BasicManager(ModelAPI):
             return (self.integ_tot.detach().tolist(),self.err_tot.detach().tolist())
         else:
             return (0,0)
-    
+        
+    def integrate(self, f, nitn, neval, dev=None):
+        if(self.best_model==None):
+            print("No model has been trained")
+            return (0,0)
+        if(dev==None or not torch.cuda.is_available()):
+            dev=torch.device("cpu")
+        else:
+            dev=dev = torch.device("cuda:"+str(dev)) 
+        w = torch.empty(neval, self.n_flow).to(dev)
+        var=torch.zeros((nitn,))
+        mean=torch.zeros((nitn,))
+        for i in range(nitn):
+            
+            torch.nn.init.uniform_(w)
+            Y=self.format_input(w,dev)
+            X=self.best_model(Y).detach()
+            fres=f(X[:,:-1])*X[:,-1]
+            var[i]=torch.var(fres)/np.sqrt(neval)
+            mean[i]=torch.mean(fres)
+
+        sig=torch.sum(mean/var)/torch.sum(1/var)
+        sig_err=torch.sqrt(1/torch.sum(1/var))
+       
+        return (sig, sig_err)
   
     
     

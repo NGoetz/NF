@@ -71,7 +71,7 @@ class AddJacobian(torch.nn.Module):
         self.jacobian_value = jacobian_value   
 
     
-    def forward(self, input, dev):
+    def forward(self, input, dev=torch.device("cpu")):
         
         return torch.cat((input.to(dev), self.jacobian_value.expand(input.shape[0],1).to(dev).to(torch.double)), dim=1)
 
