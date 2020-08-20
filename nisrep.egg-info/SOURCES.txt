@@ -1,9 +1,6 @@
 README.md
 setup.py
 nisrep/__init__.py
-nisrep/experiment_mg.py
-nisrep/experiment_seq.py
-nisrep/experiment_vegas.py
 nisrep.egg-info/PKG-INFO
 nisrep.egg-info/SOURCES.txt
 nisrep.egg-info/dependency_links.txt
