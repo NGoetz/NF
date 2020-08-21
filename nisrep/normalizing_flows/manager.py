@@ -379,11 +379,11 @@ class BasicManager(ModelAPI):
             Y=self.format_input(w,dev)
             X=self.best_model(Y).detach()
             fres=f(X[:,:-1])*X[:,-1]
-            var[i]=torch.var(fres)/np.sqrt(neval)
+            var[i]=torch.var(fres)
             mean[i]=torch.mean(fres)
-
+           
         sig=torch.sum(mean/var)/torch.sum(1/var)
-        sig_err=torch.sqrt(1/torch.sum(1/var))
+        sig_err=torch.sqrt(1/torch.sum(1/var))/np.sqrt(neval*nitn)
        
         return (sig, sig_err)
   
