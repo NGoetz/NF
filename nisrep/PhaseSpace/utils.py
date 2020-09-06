@@ -31,9 +31,7 @@ def rho2_tt(inputt):
 def boostVector_t(inputt):
         
         if torch.min(inputt[:,0]) <= 0. or torch.min(square_t(inputt)) < 0.:
-            logger.critical("Attempting to compute a boost vector from")
-            logger.critical("%s (%.9e)" % (str(self), self.square()))
-            raise InvalidOperation
+            print("Invalid boost")
         
         return inputt[:,1:]/inputt[:,0].unsqueeze(1)
     

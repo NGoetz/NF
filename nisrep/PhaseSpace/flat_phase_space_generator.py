@@ -178,11 +178,13 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
             
                 xb_1=random_variables_full[:,-1]
                 xb_2=random_variables_full[:,-2]
+               
                 E_cm=torch.sqrt(xb_1*xb_2)*E_cm
             
             p_energy=(torch.ones_like(xb_1)*(91.188)**2).to(random_variables.device)
-            
-            wgt_jac*=self.get_pdfQ2(self.pdf,pdgs[0],xb_1,p_energy)*self.get_pdfQ2(self.pdf,pdgs[1],xb_2,p_energy)
+            x_cut=torch.where(xb_1<1e-4,torch.zeros_like(xb_1),torch.ones_like(xb_1))
+            x_cut=torch.where(xb_2<1e-4,torch.zeros_like(x_cut),x_cut)
+            wgt_jac*=self.get_pdfQ2(self.pdf,pdgs[0],xb_1,p_energy)*self.get_pdfQ2(self.pdf,pdgs[1],xb_2,p_energy)*x_cut
             
             
         
@@ -227,7 +229,7 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         
         rnd=random_variables[:,self.n_final-2:3*self.n_final-4]
         
-        r2=torch.empty_like(rnd[:,0::2])
+        
         cos_theta_t=(2.*rnd[:,0::2]-1.)
         theta_t=torch.acos(cos_theta_t)
         sin_theta_t=(torch.sqrt(1.-cos_theta_t**2))
@@ -358,7 +360,7 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
             
 
     
-    def generateIntermediatesMasslessVec_batch(self, M_t, E_cm, random_variables): 
+    def generateIntermediatesMassless_batch(self, M_t, E_cm, random_variables): 
         """Generate intermediate masses for a massless final state. Batch version"""
         
         
@@ -381,7 +383,7 @@ class FlatInvertiblePhasespace(VirtualPhaseSpaceGenerator):
         
         M[:,0] -= torch.sum(self.masses_t)
         
-        weight = self.generateIntermediatesMasslessVec_batch(M, E_cm, random_variables)
+        weight = self.generateIntermediatesMassless_batch(M, E_cm, random_variables)
        
         
         K_t=M.clone()

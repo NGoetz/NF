@@ -25,6 +25,7 @@ class MaskLayer(torch.nn.Module):
        
 
     def forward(self, tensor):
+       
      
         return torch.cat((torch.index_select(tensor, -1, self.feeder.view(-1)),
                           torch.index_select(tensor, -1, self.trafoer.view(-1)),

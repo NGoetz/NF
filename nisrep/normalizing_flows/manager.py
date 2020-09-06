@@ -67,7 +67,7 @@ class BasicManager(ModelAPI):
                                     epoch_start=0,
                                pretty_progressbar=True,  
                                     save_best=True, run=None,dev=0,mini_batch_size=2000, integrate=False,
-                                    preburn_time=75, kill_counter=7, impr_ratio=1e-2):
+                                    preburn_time=75, kill_counter=7, impr_ratio=1e-2, loss_mode="var"):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
 
@@ -82,13 +82,15 @@ class BasicManager(ModelAPI):
         
         if(mini_batch_size>batch_size):
             mini_batch_size=batch_size
+        
         n_minibatches = int(batch_size/mini_batch_size)
+        batch_size=batch_size-(batch_size%mini_batch_size)
         
         if(run!=None and log): 
-            filename=logdir+"/"+str(_run._id)+"/torch"
+            filename=logdir+"/"+str(run._id)+"/torch"
             filename2=filename+"_int"
-            if not os.path.exists(logdir+"/"+str(_run._id)):
-                os.mkdir(logdir+"/"+str(_run._id))
+            if not os.path.exists(logdir+"/"+str(run._id)):
+                os.mkdir(logdir+"/"+str(run._id))
    
         else:
             filename=logdir+"/torch"
@@ -149,13 +151,18 @@ class BasicManager(ModelAPI):
             if torch.max(fres)>maxf:
                 maxf=torch.max(fres) 
             
-            self.best_loss+=torch.var(fres/maxf).detach()/self.n_flow
-           
+            if(loss_mode=="var"):
+                self.best_loss+=torch.var(fres/maxf).detach()/self.n_flow
+            elif(loss_mode=="est" ):
+                self.best_loss+=torch.mean((fres)**2).detach()/self.n_flow
+            else:
+                print("Unknown loss function")
+                return
             
             i=i+1
             
             
-            self.best_var+=float((torch.var((fres)**2)/2*mini_batch_size).detach())
+            self.best_var+=float((torch.var((fres/maxf)**2)/2*mini_batch_size).detach())
         
             
         
@@ -182,27 +189,30 @@ class BasicManager(ModelAPI):
             self.best_epoch=0
             self.best_time=0
             self.best_loss_rel=torch.ones_like(self.best_loss)
-            self.func_count=2*mini_batch_size*self.n_flow/(batch_size/mini_batch_size)
             self.best_func_count=2*mini_batch_size*self.n_flow/(batch_size/mini_batch_size)
+            self.best_func_count=2*batch_size*self.n_flow
+            self.history=[]
+            
             del XJ,X,J
         if(run!=None and log):
             run.log_scalar("training.int_loss", self.best_loss.tolist(), 0)
        
 
         self.int_loss=self.best_loss
-           
+        
     
         
         stale_save=1000
-        preburner=True
+        
+        preburner=(preburn_time>0)
       
         counter=0
         last_loss=1000
-        #print("START")
+        
         for i in epoch_progress:
+            
             loss = 0
-            loss2=0
-            loss3=0
+            
             var = 0
             optimizer_object.zero_grad()
             
@@ -240,10 +250,15 @@ class BasicManager(ModelAPI):
                     
                
                     
-                if(save_best):
-                    self.func_count=self.func_count+1
                 
-                loss+=torch.var(fXJ)
+                if(loss_mode=="var"):
+                    loss+=torch.var(fXJ)
+                    
+                elif(loss_mode=="est"):
+                    loss+=torch.mean((fXJ*maxf)**2)
+                    
+                          
+                
                 
                 
                 # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
@@ -255,16 +270,16 @@ class BasicManager(ModelAPI):
                 gc.collect()
                 
       
-           
-           
+            
+            
             loss=loss/n_minibatches
-           
+            
             
             loss.backward()
             
             optimizer_object.step()
             
-            
+            self.history.append(loss.detach())
             # Update the progress bar
             if pretty_progressbar:
                 epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
@@ -274,7 +289,7 @@ class BasicManager(ModelAPI):
                
 
             if (save_best or log):     
-                self.best_func_count=self.func_count*mini_batch_size
+                self.best_func_count=self.best_func_count+batch_size
             if (save_best or log) and (loss < self.best_loss) and not preburner:
                 self.best_loss = loss
                 self.best_var=var
@@ -328,7 +343,7 @@ class BasicManager(ModelAPI):
                         integ[s+1]+=torch.mean(fres)/(n_minibatches*math.sqrt(mini_batch_size))
                         err[s+1]+=torch.std(fres)/n_minibatches
                     
-                    self.best_func_count=self.best_func_count+1
+                    self.best_func_count=self.best_func_count+batch_size
        
        
         self.integ_tot=torch.sum(integ/err)/torch.sum(1/err)
@@ -370,6 +385,8 @@ class BasicManager(ModelAPI):
             dev=torch.device("cpu")
         else:
             dev=dev = torch.device("cuda:"+str(dev)) 
+        neval=int(neval)
+        nitn=int(nitn)
         w = torch.empty(neval, self.n_flow).to(dev)
         var=torch.zeros((nitn,))
         mean=torch.zeros((nitn,))

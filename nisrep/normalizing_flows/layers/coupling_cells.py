@@ -20,7 +20,8 @@ class AffineCoupling(torch.nn.Module):
         #the last layer has 2 outputs: scaling factor and translation
         sizes = NN_layers + [(2 * self.transform_size)] 
         NN_layers=[]
-        NN_layers.append(torch.nn.BatchNorm1d(sizes[0]))
+        
+        NN_layers.append(torch.nn.BatchNorm1d(pass_through_size))
         
         NN_layers.append(torch.nn.Linear(pass_through_size, sizes[0])) #size only one dim
        
@@ -38,6 +39,7 @@ class AffineCoupling(torch.nn.Module):
        
          
         NN_layers.append((torch.nn.Linear(oldsize,sizes[-1])))
+        #NN_layers.append(torch.nn.Sigmoid())
        
         
         NN_layers.append(Reshape(2, self.transform_size))
@@ -50,16 +52,21 @@ class AffineCoupling(torch.nn.Module):
         xB = x[:, self.pass_through_size:self.flow_size] 
         
         shift_rescale = self.NN(xA) #The NN is evaluated on the pass-through dimensons
-        z=torch.ones_like(shift_rescale[:,0])
-        s0=shift_rescale[:,0]
-       
-        s1=8*shift_rescale[:,1]-4
-        yB = torch.mul(xB, s0) + s1 #xB is transformed. 
         
+        s0=torch.exp(shift_rescale[:,0])
+        s1=torch.where(shift_rescale[:,1]>0,shift_rescale[:,1],torch.zeros_like(shift_rescale[:,1]))
+        
+        
+        yB = (torch.mul(xB, 20*s0))+s1 #xB is transformed. 
+        
+        diff=1/(yB**2+1)
+       # diff=torch.ones_like(yB)
+        yB=(torch.atan(yB))/(np.pi/2)
+       
         jacobian = x[:, self.flow_size] #the old jacobian is saved in the last row of the data...
         
-        jacobian = jacobian*torch.prod(s0,1) #... and updated by the forward transformation
-       
+        jacobian = jacobian*torch.prod(20*s0,1)*(1/(np.pi/2))*torch.prod(diff,1) #... and updated by the forward transformation
+        
         return torch.cat((xA, yB, torch.unsqueeze(jacobian, 1)), dim=1)  #everything is packed in one tensor again
 
 
@@ -136,14 +143,14 @@ class PWLin(torch.nn.Module):
     
 class PWQuad(torch.nn.Module):
    
-    def __init__(self,flow_size, pass_through_size, n_bins,NN_layers, run=None):
+    def __init__(self,flow_size, pass_through_size, n_bins,NN_layers):
         super(PWQuad, self).__init__()
         
         self.pass_through_size = pass_through_size
         self.flow_size = flow_size
         self.transform_size = flow_size - pass_through_size
         self.n_bins=n_bins
-        self.run=run
+        
         
         #the last layer has the bins as output
         sizes = NN_layers + [( self.transform_size*(2*self.n_bins+1))]
@@ -153,7 +160,10 @@ class PWQuad(torch.nn.Module):
         
         
         xA = x[:, :self.pass_through_size]
+        
         xB = x[:, self.pass_through_size:self.flow_size]
+       
+        #minium distance to 1 required to ensure stability
         xB=torch.where(xB>(torch.ones_like(xB)-1e-6),(torch.ones_like(xB)-1e-6),xB)
         
         jacobian = torch.unsqueeze(x[:, self.flow_size], -1)
@@ -210,8 +220,10 @@ class PWQuad(torch.nn.Module):
         yB=yB1+yB2+shift
         
         
+        
         jacobian=jacobian*torch.unsqueeze(torch.prod(torch.lerp(torch.squeeze(torch.gather(V,-1,div_ind),axis=-1),
                                                 torch.squeeze(torch.gather(V,-1,div_ind+1),axis=-1),alphas), axis=-1),axis=-1)
+       
        
         return torch.cat((xA, yB, jacobian), axis=-1) 
         
