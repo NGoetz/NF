@@ -38,7 +38,7 @@ n_flow=2
 NF =  PWQuadManager(n_flow=n_flow)
 NF.create_model(2,4, [3]*3)
 optim = torch.optim.Adamax(NF._model.parameters(),lr=2e-3, weight_decay=1e-04) 
-NF._train_variance_forward_seq(vamel,optim,True, "./logs/tmp/",10000,300,True, True,preburn_time=50)
+NF._train_variance_forward_seq(camel,optim,True, "./logs/tmp/",10000,300,0,True, True,preburn_time=50)
 ```
 Afterwards, `NF.best_model` can be used for Monte-Carlo integration!
 ```
@@ -55,6 +55,8 @@ my_PS_generator=FlatInvertiblePhasespace([mass]*2, [mass + 0.*i for i in range(4
 momenta, wgt = my_PS_generator.generateKinematics_batch(E_cm, w,pT_mincut=0,
                                                             delR_mincut=0, rap_maxcut=-1,pdgs=[2,-1])
 ```
+
+Take a look at the [Demo Notebook](https://www.niklasgoetz.com/gallery/Demo.zip)
 ## Features
 
 * Neural importance sampling based on variance loss with linear and quadratic coupling cells
